@@ -1,20 +1,38 @@
-export type LogLevel = "debug" | "info" | "warn" | "error";
+import { EventEmitter } from "events";
+
+export type LogLevel = "info" | "warn" | "error";
 
 export interface LogEntry {
+  ts: string;
   level: LogLevel;
-  message: string;
-  timestamp: number;
-  context?: string;
+  source: string;
+  msg: string;
 }
 
-export type LogListener = (entry: LogEntry) => void;
+export const loggerEvents = new EventEmitter();
 
-export const createLogger = (_context?: string): LogListener => {
-  return () => {
-    // Placeholder logger implementation
+const emit = (level: LogLevel, source: string, msg: string): void => {
+  const entry: LogEntry = {
+    ts: new Date().toISOString(),
+    level,
+    source,
+    msg,
   };
+
+  const formatted = `[${entry.ts}] [${entry.source}] ${entry.msg}`;
+  if (level === "warn") {
+    console.warn(formatted);
+  } else if (level === "error") {
+    console.error(formatted);
+  } else {
+    console.info(formatted);
+  }
+
+  loggerEvents.emit("log", entry);
 };
 
-export const setGlobalListener = (_listener: LogListener): void => {
-  void _listener;
-};
+export const logInfo = (source: string, msg: string): void => emit("info", source, msg);
+
+export const logWarn = (source: string, msg: string): void => emit("warn", source, msg);
+
+export const logError = (source: string, msg: string): void => emit("error", source, msg);
