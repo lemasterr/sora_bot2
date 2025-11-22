@@ -24,7 +24,9 @@ import type {
   WatermarkFramesResult,
   ChromeProfile,
   ManagedSession,
-  SessionCommandAction
+  SessionCommandAction,
+  PipelineStep,
+  PipelineProgress
 } from '../shared/types';
 import { sessionLogBroker } from './sessionLogs';
 
@@ -34,6 +36,8 @@ let mainWindow: BrowserWindow | null = null;
 let sessionManager: SessionManager | null = null;
 let currentConfig: Config | null = null;
 const sessionRunStates = new Map<string, ManagedSession['status']>();
+let pipelineRunning = false;
+let pipelineCancelled = false;
 
 const logSession = (sessionId: string, scope: string, message: string, level: 'info' | 'error' = 'info') => {
   sessionLogBroker.log(sessionId, {
@@ -42,6 +46,157 @@ const logSession = (sessionId: string, scope: string, message: string, level: 'i
     level,
     message
   });
+};
+
+const buildSessionContext = async (sessionName: string): Promise<SessionRunContext> => {
+  if (!sessionManager || !currentConfig) {
+    throw new Error('Session manager not initialized');
+  }
+
+  const paths = await sessionManager.getSessionPaths(sessionName);
+
+  return {
+    sessionName,
+    ...paths,
+    config: currentConfig,
+    cancelled: false
+  };
+};
+
+const emitPipelineProgress = (payload: PipelineProgress) => {
+  mainWindow?.webContents.send('pipeline:progress', {
+    timestamp: Date.now(),
+    ...payload
+  });
+};
+
+const handlePipelineStep = async (step: PipelineStep, stepIndex: number): Promise<RunResult> => {
+  const sessions = step.sessions ?? [];
+
+  if (['session_prompts', 'session_images', 'session_mix'].includes(step.type)) {
+    for (const sessionName of sessions) {
+      if (pipelineCancelled) return { ok: false, details: 'Cancelled' };
+      emitPipelineProgress({
+        stepIndex,
+        stepType: step.type,
+        status: 'running',
+        message: `Running prompts for ${sessionName}`,
+        session: sessionName
+      });
+      const ctx = await buildSessionContext(sessionName);
+      const result = await runPrompts(ctx);
+      emitPipelineProgress({
+        stepIndex,
+        stepType: step.type,
+        status: result.ok ? 'success' : 'error',
+        message: result.ok ? 'Prompts completed' : result.error || 'Failed to run prompts',
+        session: sessionName
+      });
+      if (!result.ok) return result;
+    }
+    return { ok: true, details: 'Prompt steps complete' };
+  }
+
+  if (step.type === 'session_download') {
+    for (const sessionName of sessions) {
+      if (pipelineCancelled) return { ok: false, details: 'Cancelled' };
+      emitPipelineProgress({
+        stepIndex,
+        stepType: step.type,
+        status: 'running',
+        message: `Downloading for ${sessionName}`,
+        session: sessionName
+      });
+      const ctx = await buildSessionContext(sessionName);
+      const result = await runDownloads(ctx, step.limit ?? 1);
+      emitPipelineProgress({
+        stepIndex,
+        stepType: step.type,
+        status: result.ok ? 'success' : 'error',
+        message: result.ok ? 'Downloads completed' : result.error || 'Failed to download',
+        session: sessionName
+      });
+      if (!result.ok) return result;
+    }
+    return { ok: true, details: 'Download steps complete' };
+  }
+
+  // Placeholder implementations for global or non-automation steps
+  emitPipelineProgress({
+    stepIndex,
+    stepType: step.type,
+    status: 'running',
+    message: 'Executing placeholder step'
+  });
+
+  await new Promise((resolve) => setTimeout(resolve, 300));
+
+  emitPipelineProgress({
+    stepIndex,
+    stepType: step.type,
+    status: 'success',
+    message: 'Step complete'
+  });
+
+  return { ok: true, details: 'Step complete' };
+};
+
+const runPipeline = async (steps: PipelineStep[]): Promise<RunResult> => {
+  if (pipelineRunning) {
+    return { ok: false, error: 'Pipeline already running' };
+  }
+
+  pipelineRunning = true;
+  pipelineCancelled = false;
+
+  emitPipelineProgress({ stepIndex: -1, stepType: 'pipeline', status: 'running', message: 'Pipeline started' });
+
+  try {
+    for (let i = 0; i < steps.length; i += 1) {
+      if (pipelineCancelled) {
+        emitPipelineProgress({
+          stepIndex: i,
+          stepType: steps[i].type,
+          status: 'error',
+          message: 'Pipeline cancelled'
+        });
+        pipelineRunning = false;
+        return { ok: false, details: 'Cancelled' };
+      }
+
+      const result = await handlePipelineStep(steps[i], i);
+      if (!result.ok) {
+        emitPipelineProgress({
+          stepIndex: i,
+          stepType: steps[i].type,
+          status: 'error',
+          message: result.error || 'Step failed'
+        });
+        pipelineRunning = false;
+        return result;
+      }
+    }
+
+    emitPipelineProgress({
+      stepIndex: steps.length,
+      stepType: 'pipeline',
+      status: 'success',
+      message: 'Pipeline finished'
+    });
+
+    pipelineRunning = false;
+    return { ok: true, details: 'Pipeline finished' };
+  } catch (error) {
+    pipelineRunning = false;
+    const message = error instanceof Error ? error.message : 'Unknown error';
+    emitPipelineProgress({ stepIndex: -1, stepType: 'pipeline', status: 'error', message });
+    return { ok: false, error: message };
+  }
+};
+
+const stopPipeline = () => {
+  pipelineCancelled = true;
+  emitPipelineProgress({ stepIndex: -1, stepType: 'pipeline', status: 'error', message: 'Stop requested' });
 };
 
 const createWindow = () => {
@@ -296,21 +451,6 @@ const registerIpc = () => {
     return result.filePaths[0];
   });
 
-  const buildSessionContext = async (sessionName: string): Promise<SessionRunContext> => {
-    if (!sessionManager || !currentConfig) {
-      throw new Error('Session manager not initialized');
-    }
-
-    const paths = await sessionManager.getSessionPaths(sessionName);
-
-    return {
-      sessionName,
-      ...paths,
-      config: currentConfig,
-      cancelled: false
-    };
-  };
-
   const handleAutomation = async (runner: () => Promise<RunResult>): Promise<RunResult> => {
     try {
       return await runner();
@@ -356,6 +496,15 @@ const registerIpc = () => {
       currentConfig = await loadConfig();
     }
     return sendTestMessage(currentConfig.telegramBotToken, currentConfig.telegramChatId);
+  });
+
+  ipcMain.handle('pipeline:run', async (_event, steps: PipelineStep[]): Promise<RunResult> => {
+    return runPipeline(steps);
+  });
+
+  ipcMain.handle('pipeline:stop', async (): Promise<RunResult> => {
+    stopPipeline();
+    return { ok: true, details: 'Stop requested' };
   });
 };
 

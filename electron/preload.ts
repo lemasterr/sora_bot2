@@ -9,7 +9,9 @@ import type {
   RunResult,
   SessionFiles,
   SessionInfo,
-  WatermarkFramesResult
+  WatermarkFramesResult,
+  PipelineStep,
+  PipelineProgress
 } from '../shared/types';
 
 type Listener = (event: IpcRendererEvent, data: unknown) => void;
@@ -54,6 +56,15 @@ const electronAPI = {
       sessionId: string,
       data: SessionFiles
     ): Promise<{ ok: boolean; error?: string }> => ipcRenderer.invoke('files:save', sessionId, data)
+  },
+  pipeline: {
+    run: (steps: PipelineStep[]): Promise<RunResult> => ipcRenderer.invoke('pipeline:run', steps),
+    stop: (): Promise<RunResult> => ipcRenderer.invoke('pipeline:stop'),
+    onProgress: (callback: (progress: PipelineProgress) => void): (() => void) => {
+      const handler = (_event: IpcRendererEvent, payload: PipelineProgress) => callback(payload);
+      ipcRenderer.on('pipeline:progress', handler);
+      return () => ipcRenderer.removeListener('pipeline:progress', handler);
+    }
   },
   sessions: {
     list: (): Promise<ManagedSession[]> => ipcRenderer.invoke('sessions:registry:list'),

@@ -92,3 +92,32 @@ export interface WatermarkFramesResult {
   frames: string[];
   tempDir: string;
 }
+
+export type PipelineStepType =
+  | 'session_prompts'
+  | 'session_images'
+  | 'session_mix'
+  | 'session_download'
+  | 'session_watermark'
+  | 'session_chrome'
+  | 'global_blur'
+  | 'global_merge'
+  | 'global_watermark'
+  | 'global_probe'
+  | 'pipeline';
+
+export interface PipelineStep {
+  type: PipelineStepType;
+  sessions?: string[];
+  limit?: number;
+  group?: string;
+}
+
+export interface PipelineProgress {
+  stepIndex: number;
+  stepType: PipelineStepType;
+  status: 'running' | 'success' | 'error';
+  message: string;
+  session?: string;
+  timestamp?: number;
+}

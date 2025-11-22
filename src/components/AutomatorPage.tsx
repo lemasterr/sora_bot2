@@ -1,109 +1,213 @@
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { useAppStore } from '../store';
-import type { RunResult } from '../shared/types';
+import type { PipelineProgress, PipelineStep, PipelineStepType } from '../shared/types';
 
-type PipelineStatus = {
-  status: 'idle' | 'running' | 'success' | 'error';
-  message?: string;
-};
+type UiStep = PipelineStep & { id: string };
+
+const STEP_TYPES: { value: PipelineStepType; label: string }[] = [
+  { value: 'session_prompts', label: 'Session Prompts' },
+  { value: 'session_images', label: 'Session Images' },
+  { value: 'session_mix', label: 'Session Mix' },
+  { value: 'session_download', label: 'Session Download' },
+  { value: 'session_watermark', label: 'Session Watermark' },
+  { value: 'session_chrome', label: 'Session Chrome' },
+  { value: 'global_blur', label: 'Global Blur' },
+  { value: 'global_merge', label: 'Global Merge' },
+  { value: 'global_watermark', label: 'Global Watermark' },
+  { value: 'global_probe', label: 'Global Probe' }
+];
+
+const createStep = (): UiStep => ({
+  id: crypto.randomUUID(),
+  type: 'session_prompts',
+  sessions: [],
+  limit: 1,
+  group: ''
+});
 
 export const AutomatorPage: React.FC = () => {
   const { sessions } = useAppStore();
-  const [selected, setSelected] = useState<Record<string, boolean>>({});
-  const [maxVideos, setMaxVideos] = useState<Record<string, number>>({});
-  const [doPrompts, setDoPrompts] = useState(true);
-  const [doDownloads, setDoDownloads] = useState(true);
-  const [statuses, setStatuses] = useState<Record<string, PipelineStatus>>({});
+  const [steps, setSteps] = useState<UiStep[]>([createStep()]);
+  const [logs, setLogs] = useState<PipelineProgress[]>([]);
+  const [status, setStatus] = useState<'idle' | 'running' | 'success' | 'error'>('idle');
 
-  const selectableSessions = useMemo(() => sessions.map((s) => s.name), [sessions]);
+  const sessionOptions = useMemo(() => sessions.map((s) => s.name), [sessions]);
+  const statusColor =
+    status === 'running' ? 'bg-blue-500' : status === 'success' ? 'bg-emerald-500' : status === 'error' ? 'bg-red-500' : 'bg-zinc-700';
 
-  const runForSession = async (name: string) => {
-    setStatuses((prev) => ({ ...prev, [name]: { status: 'running', message: 'Starting...' } }));
-    let lastResult: RunResult | null = null;
-
-    try {
-      if (doPrompts) {
-        setStatuses((prev) => ({ ...prev, [name]: { status: 'running', message: 'Running prompts…' } }));
-        lastResult = await window.electronAPI.runPrompts(name);
-        if (!lastResult.ok) throw new Error(lastResult.error || 'Prompt run failed');
+  useEffect(() => {
+    const unsubscribe = window.electronAPI.pipeline.onProgress((progress) => {
+      setLogs((prev) => [progress, ...prev].slice(0, 3));
+      if (progress.stepType === 'pipeline') {
+        if (progress.status === 'running') setStatus('running');
+        if (progress.status === 'success') setStatus('success');
+        if (progress.status === 'error') setStatus('error');
       }
+    });
 
-      if (doDownloads) {
-        setStatuses((prev) => ({ ...prev, [name]: { status: 'running', message: 'Downloading videos…' } }));
-        const max = maxVideos[name] ?? 1;
-        lastResult = await window.electronAPI.runDownloads(name, max);
-        if (!lastResult.ok) throw new Error(lastResult.error || 'Download run failed');
-      }
+    return () => unsubscribe();
+  }, []);
 
-      setStatuses((prev) => ({ ...prev, [name]: { status: 'success', message: lastResult?.details || 'Done' } }));
-    } catch (error) {
-      setStatuses((prev) => ({
-        ...prev,
-        [name]: { status: 'error', message: (error as Error).message }
-      }));
+  const updateStep = (id: string, partial: Partial<UiStep>) => {
+    setSteps((prev) => prev.map((step) => (step.id === id ? { ...step, ...partial } : step)));
+  };
+
+  const addStep = () => setSteps((prev) => [...prev, createStep()]);
+
+  const removeStep = (id: string) => setSteps((prev) => prev.filter((step) => step.id !== id));
+
+  const handleSessionsChange = (id: string, options: HTMLOptionElement[]) => {
+    const selectedSessions = options.filter((opt) => opt.selected).map((opt) => opt.value);
+    updateStep(id, { sessions: selectedSessions });
+  };
+
+  const startPipeline = async () => {
+    setStatus('running');
+    const payload: PipelineStep[] = steps.map(({ id, ...rest }) => ({ ...rest }));
+    const result = await window.electronAPI.pipeline.run(payload);
+    if (!result.ok) {
+      setStatus('error');
     }
   };
 
-  const handlePipeline = async () => {
-    const selectedSessions = selectableSessions.filter((name) => selected[name]);
-    for (const name of selectedSessions) {
-      // Run sequentially to avoid overwhelming resources
-      // eslint-disable-next-line no-await-in-loop
-      await runForSession(name);
-    }
+  const stopPipeline = async () => {
+    await window.electronAPI.pipeline.stop();
+    setStatus('idle');
   };
 
   return (
-    <div className="space-y-4">
-      <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
-        <div>
-          <h3 className="text-lg font-semibold text-white">Automation Pipeline</h3>
-          <p className="text-sm text-slate-400">Run prompts and downloads across multiple sessions.</p>
-        </div>
-        <div className="flex items-center gap-3 text-sm text-slate-200">
-          <label className="flex items-center gap-2">
-            <input type="checkbox" checked={doPrompts} onChange={(e) => setDoPrompts(e.target.checked)} />
-            Generate drafts
-          </label>
-          <label className="flex items-center gap-2">
-            <input type="checkbox" checked={doDownloads} onChange={(e) => setDoDownloads(e.target.checked)} />
-            Download videos
-          </label>
-        </div>
-      </div>
-
-      <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
-        {selectableSessions.map((name) => (
-          <div key={name} className="rounded-lg border border-slate-800 bg-slate-900/60 p-4">
-            <label className="flex items-center gap-3 text-sm text-slate-100">
-              <input
-                type="checkbox"
-                checked={!!selected[name]}
-                onChange={(e) => setSelected((prev) => ({ ...prev, [name]: e.target.checked }))}
-              />
-              {name}
-            </label>
-            <div className="mt-3 flex items-center gap-2">
-              <input
-                type="number"
-                min={1}
-                value={maxVideos[name] ?? 1}
-                onChange={(e) => setMaxVideos((prev) => ({ ...prev, [name]: Number(e.target.value) }))}
-                className="w-24 rounded-lg border border-slate-700 bg-slate-950 px-2 py-2 text-sm text-slate-100 focus:border-emerald-500 focus:outline-none"
-              />
-              <span className="text-xs text-slate-400">Max videos</span>
-            </div>
-            <div className="mt-2 text-xs text-slate-400">Status: {statuses[name]?.message || statuses[name]?.status || 'idle'}</div>
+    <div className="grid gap-4 lg:grid-cols-[2fr_1fr]">
+      <div className="space-y-3">
+        <div className="flex items-center justify-between">
+          <div>
+            <h3 className="text-lg font-semibold text-white">Automator Pipeline Editor</h3>
+            <p className="text-sm text-zinc-400">Define ordered automation steps across sessions.</p>
           </div>
-        ))}
+          <div className="flex items-center gap-2 text-xs text-zinc-300">
+            <span className={`h-2 w-2 rounded-full ${statusColor}`} data-status={status} />
+            <span className="capitalize">{status}</span>
+          </div>
+        </div>
+
+        <div className="flex gap-2">
+          <button
+            onClick={addStep}
+            className="rounded-lg bg-blue-600 px-3 py-2 text-sm font-semibold text-white transition hover:bg-blue-500"
+          >
+            Add Step
+          </button>
+          <button
+            onClick={startPipeline}
+            className="rounded-lg bg-emerald-600 px-3 py-2 text-sm font-semibold text-white transition hover:bg-emerald-500"
+          >
+            Start Pipeline
+          </button>
+          <button
+            onClick={stopPipeline}
+            className="rounded-lg border border-red-600 px-3 py-2 text-sm font-semibold text-red-200 transition hover:bg-red-600/20"
+          >
+            Stop
+          </button>
+        </div>
+
+        <div className="space-y-3">
+          {steps.map((step, index) => (
+            <div key={step.id} className="rounded-xl border border-zinc-700 bg-zinc-900 p-4">
+              <div className="flex items-center justify-between gap-3">
+                <div className="flex items-center gap-3">
+                  <div className="rounded bg-zinc-800 px-2 py-1 text-xs text-zinc-300">Step {index + 1}</div>
+                  <select
+                    value={step.type}
+                    onChange={(e) => updateStep(step.id, { type: e.target.value as PipelineStepType })}
+                    className="rounded-md border border-zinc-700 bg-zinc-800 px-3 py-2 text-sm text-zinc-100 focus:border-blue-500 focus:outline-none"
+                  >
+                    {STEP_TYPES.map((option) => (
+                      <option key={option.value} value={option.value}>
+                        {option.label}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                <button
+                  onClick={() => removeStep(step.id)}
+                  className="text-xs text-red-400 transition hover:text-red-300"
+                >
+                  Remove Step
+                </button>
+              </div>
+
+              <div className="mt-4 grid gap-4 md:grid-cols-2">
+                <div className="space-y-2">
+                  <label className="text-xs uppercase tracking-wide text-zinc-400">Sessions</label>
+                  <select
+                    multiple
+                    value={step.sessions}
+                    onChange={(e) => handleSessionsChange(step.id, Array.from(e.target.options))}
+                    className="h-28 w-full rounded-md border border-zinc-700 bg-zinc-800 px-3 py-2 text-sm text-zinc-100 focus:border-blue-500 focus:outline-none"
+                  >
+                    {sessionOptions.map((name) => (
+                      <option key={name} value={name}>
+                        {name}
+                      </option>
+                    ))}
+                  </select>
+                  <p className="text-xs text-zinc-500">Select one or more sessions for this step.</p>
+                </div>
+
+                <div className="grid gap-3 md:grid-cols-2">
+                  {step.type === 'session_download' && (
+                    <div className="space-y-2">
+                      <label className="text-xs uppercase tracking-wide text-zinc-400">Max Downloads</label>
+                      <input
+                        type="number"
+                        min={1}
+                        value={step.limit ?? 1}
+                        onChange={(e) => updateStep(step.id, { limit: Number(e.target.value) })}
+                        className="w-full rounded-md border border-zinc-700 bg-zinc-800 px-3 py-2 text-sm text-zinc-100 focus:border-blue-500 focus:outline-none"
+                      />
+                    </div>
+                  )}
+                  {step.type === 'global_merge' && (
+                    <div className="space-y-2">
+                      <label className="text-xs uppercase tracking-wide text-zinc-400">Group</label>
+                      <input
+                        type="text"
+                        value={step.group ?? ''}
+                        onChange={(e) => updateStep(step.id, { group: e.target.value })}
+                        className="w-full rounded-md border border-zinc-700 bg-zinc-800 px-3 py-2 text-sm text-zinc-100 focus:border-blue-500 focus:outline-none"
+                        placeholder="merge group"
+                      />
+                    </div>
+                  )}
+                </div>
+              </div>
+            </div>
+          ))}
+        </div>
       </div>
 
-      <button
-        onClick={handlePipeline}
-        className="rounded-lg bg-emerald-600 px-4 py-2 text-sm font-semibold text-white shadow hover:bg-emerald-500"
-      >
-        Run Pipeline
-      </button>
+      <div className="space-y-3 rounded-xl border border-zinc-700 bg-zinc-900 p-4">
+        <div className="flex items-center justify-between">
+          <div>
+            <h4 className="text-sm font-semibold text-white">Active Logs</h4>
+            <p className="text-xs text-zinc-500">Latest pipeline events</p>
+          </div>
+        </div>
+        <div className="space-y-2 text-sm font-mono text-zinc-200">
+          {logs.length === 0 && <div className="text-zinc-500">No events yet.</div>}
+          {logs.map((log, idx) => (
+            <div key={`${log.stepIndex}-${idx}`} className="rounded border border-zinc-800 bg-zinc-950/70 px-3 py-2">
+              <div className="flex items-center justify-between text-xs text-zinc-400">
+                <span>{log.stepIndex >= 0 ? `Step ${log.stepIndex + 1}` : 'Pipeline'}</span>
+                <span className="capitalize">{log.status}</span>
+              </div>
+              <div className="text-blue-400">{log.stepType}</div>
+              <div className="text-zinc-100">{log.message}</div>
+              {log.session && <div className="text-emerald-400">{log.session}</div>}
+            </div>
+          ))}
+        </div>
+      </div>
     </div>
   );
 };
