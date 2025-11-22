@@ -11,7 +11,9 @@ const defaultConfig = (): Config => ({
   draftTimeoutMs: 60_000,
   downloadTimeoutMs: 300_000,
   maxParallelSessions: 2,
-  autoSendDownloads: false
+  autoSendDownloads: false,
+  chromeProfiles: [],
+  activeChromeProfile: undefined
 });
 
 const getConfigPath = () => path.join(app.getPath('userData'), 'config.json');

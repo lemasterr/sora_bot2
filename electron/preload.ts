@@ -2,6 +2,7 @@ import { contextBridge, ipcRenderer, IpcRendererEvent } from 'electron';
 import type {
   Config,
   DownloadedVideo,
+  ChromeProfile,
   RunResult,
   SessionFiles,
   SessionInfo,
@@ -35,7 +36,14 @@ const electronAPI = {
   windowMinimize: (): Promise<void> => ipcRenderer.invoke('window:minimize'),
   windowMaximize: (): Promise<void> => ipcRenderer.invoke('window:maximize'),
   windowClose: (): Promise<void> => ipcRenderer.invoke('window:close'),
-  isWindowMaximized: (): Promise<boolean> => ipcRenderer.invoke('window:isMaximized')
+  isWindowMaximized: (): Promise<boolean> => ipcRenderer.invoke('window:isMaximized'),
+  chrome: {
+    list: (): Promise<ChromeProfile[]> => ipcRenderer.invoke('chrome:list'),
+    scan: (): Promise<ChromeProfile[]> => ipcRenderer.invoke('chrome:scan'),
+    setActive: (name: string): Promise<ChromeProfile[]> => ipcRenderer.invoke('chrome:setActive', name),
+    save: (profile: ChromeProfile): Promise<ChromeProfile[]> => ipcRenderer.invoke('chrome:save', profile),
+    remove: (name: string): Promise<ChromeProfile[]> => ipcRenderer.invoke('chrome:remove', name)
+  }
 };
 
 declare global {

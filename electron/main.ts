@@ -6,13 +6,21 @@ import { cancelSessionRun, runDownloads, runPrompts } from './automation/session
 import { setChromeExecutablePath, type SessionRunContext } from './automation/chromeController';
 import { generateWatermarkFrames } from './watermark';
 import { sendTestMessage } from './telegram';
+import {
+  listChromeProfiles,
+  removeChromeProfile,
+  saveChromeProfile,
+  scanAndStoreChromeProfiles,
+  setActiveChromeProfile
+} from './chromeProfiles';
 import type {
   Config,
   DownloadedVideo,
   RunResult,
   SessionFiles,
   SessionInfo,
-  WatermarkFramesResult
+  WatermarkFramesResult,
+  ChromeProfile
 } from '../shared/types';
 
 const isDev = process.env.NODE_ENV === 'development';
@@ -75,6 +83,36 @@ const registerIpc = () => {
       sessionManager.setSessionsRoot(currentConfig.sessionsRoot);
     }
     return currentConfig;
+  });
+
+  ipcMain.handle('chrome:list', async (): Promise<ChromeProfile[]> => {
+    const profiles = await listChromeProfiles();
+    currentConfig = await loadConfig();
+    return profiles;
+  });
+
+  ipcMain.handle('chrome:scan', async (): Promise<ChromeProfile[]> => {
+    const profiles = await scanAndStoreChromeProfiles();
+    currentConfig = await loadConfig();
+    return profiles;
+  });
+
+  ipcMain.handle('chrome:setActive', async (_event, name: string): Promise<ChromeProfile[]> => {
+    const profiles = await setActiveChromeProfile(name);
+    currentConfig = await loadConfig();
+    return profiles;
+  });
+
+  ipcMain.handle('chrome:save', async (_event, profile: ChromeProfile): Promise<ChromeProfile[]> => {
+    const profiles = await saveChromeProfile(profile);
+    currentConfig = await loadConfig();
+    return profiles;
+  });
+
+  ipcMain.handle('chrome:remove', async (_event, name: string): Promise<ChromeProfile[]> => {
+    const profiles = await removeChromeProfile(name);
+    currentConfig = await loadConfig();
+    return profiles;
   });
 
   ipcMain.handle('sessions:get', async (): Promise<SessionInfo[]> => {

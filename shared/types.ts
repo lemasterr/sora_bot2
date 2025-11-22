@@ -9,6 +9,15 @@ export interface Config {
   telegramBotToken?: string;
   telegramChatId?: string;
   autoSendDownloads?: boolean;
+  chromeProfiles?: ChromeProfile[];
+  activeChromeProfile?: string;
+}
+
+export interface ChromeProfile {
+  name: string;
+  userDataDir: string;
+  profileDir: string;
+  isActive?: boolean;
 }
 
 export interface SessionInfo {
