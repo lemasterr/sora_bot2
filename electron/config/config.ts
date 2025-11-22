@@ -21,6 +21,9 @@ export type Config = {
     pipelineFinished?: string;
     sessionError?: string;
   };
+  hooks?: {
+    postDownload?: string;
+  };
 };
 
 const CONFIG_FILE = 'config.json';
@@ -45,6 +48,9 @@ function defaultConfig(): Config {
     telegramTemplates: {
       pipelineFinished: undefined,
       sessionError: undefined,
+    },
+    hooks: {
+      postDownload: undefined,
     },
   };
 }
@@ -78,6 +84,10 @@ function mergeConfig(base: Config, partial?: Partial<Config>): Config {
     telegramTemplates: {
       ...base.telegramTemplates,
       ...(partial?.telegramTemplates ?? {}),
+    },
+    hooks: {
+      ...base.hooks,
+      ...(partial?.hooks ?? {}),
     },
   };
   return next;

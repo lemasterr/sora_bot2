@@ -10,6 +10,7 @@ import type { Session } from '../sessions/types';
 import { formatTemplate, sendTelegramMessage } from '../integrations/telegram';
 import { heartbeat, startWatchdog, stopWatchdog } from './watchdog';
 import { registerSessionPage, unregisterSessionPage } from './selectorInspector';
+import { runPostDownloadHook } from './hooks';
 
 export type DownloadRunResult = {
   ok: boolean;
@@ -204,6 +205,7 @@ export async function runDownloads(session: Session, maxVideos: number): Promise
           if (latest !== targetPath) {
             await fs.rename(latest, targetPath);
           }
+          await runPostDownloadHook(targetPath, title);
         }
 
         downloaded += 1;
