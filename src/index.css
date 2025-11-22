@@ -1,0 +1,20 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  color-scheme: dark;
+}
+
+body {
+  @apply bg-gray-950 text-gray-100 antialiased;
+}
+
+* {
+  scrollbar-color: #1e293b #0f172a;
+  scrollbar-width: thin;
+}
+
+a {
+  @apply text-emerald-300 hover:text-emerald-200;
+}
