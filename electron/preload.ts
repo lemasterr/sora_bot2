@@ -48,6 +48,13 @@ const electronAPI = {
     save: (profile: ChromeProfile): Promise<ChromeProfile[]> => ipcRenderer.invoke('chrome:save', profile),
     remove: (name: string): Promise<ChromeProfile[]> => ipcRenderer.invoke('chrome:remove', name)
   },
+  files: {
+    read: (sessionId: string): Promise<SessionFiles> => ipcRenderer.invoke('files:read', sessionId),
+    save: (
+      sessionId: string,
+      data: SessionFiles
+    ): Promise<{ ok: boolean; error?: string }> => ipcRenderer.invoke('files:save', sessionId, data)
+  },
   sessions: {
     list: (): Promise<ManagedSession[]> => ipcRenderer.invoke('sessions:registry:list'),
     save: (session: ManagedSession): Promise<ManagedSession[]> => ipcRenderer.invoke('sessions:registry:save', session),

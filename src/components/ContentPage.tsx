@@ -1,143 +1,187 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { useAppStore } from '../store';
-import type { SessionFiles } from '../shared/types';
+import type { ManagedSession, SessionFiles } from '../shared/types';
 
+const panelClass =
+  'rounded-2xl border border-zinc-800 bg-[#0f0f12] shadow-lg shadow-blue-500/5 transition-all';
 const textareaClass =
-  'w-full rounded-lg border border-slate-700 bg-slate-950 p-3 font-mono text-sm text-slate-100 focus:border-emerald-500 focus:outline-none min-h-[140px]';
+  'w-full resize-none rounded-xl border border-zinc-700 bg-zinc-900/80 px-3 py-3 font-mono text-sm text-zinc-100 focus:border-blue-500 focus:outline-none';
+
+const lineCount = (value: string) => (value.length === 0 ? 0 : value.split(/\r?\n/).length);
+
+const toArrays = (values: Record<'prompts' | 'images' | 'titles', string>): SessionFiles => ({
+  prompts: values.prompts.length ? values.prompts.split(/\r?\n/) : [],
+  imagePrompts: values.images.length ? values.images.split(/\r?\n/) : [],
+  titles: values.titles.length ? values.titles.split(/\r?\n/) : []
+});
+
+const autoResize = (el: HTMLTextAreaElement) => {
+  el.style.height = 'auto';
+  el.style.height = `${el.scrollHeight}px`;
+};
 
 export const ContentPage: React.FC = () => {
-  const { sessions, selectedSessionName, setSelectedSessionName, refreshSessions } = useAppStore();
-  const [files, setFiles] = useState<SessionFiles>({ prompts: [], imagePrompts: [], titles: [] });
-  const [saving, setSaving] = useState(false);
+  const [sessions, setSessions] = useState<ManagedSession[]>([]);
+  const [selectedId, setSelectedId] = useState<string>('');
+  const [values, setValues] = useState<Record<'prompts' | 'images' | 'titles', string>>({
+    prompts: '',
+    images: '',
+    titles: ''
+  });
   const [loading, setLoading] = useState(false);
-
-  const sessionOptions = useMemo(
-    () => sessions.map((s) => ({ value: s.name, label: s.name })),
-    [sessions]
-  );
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [status, setStatus] = useState<string | null>(null);
 
   useEffect(() => {
-    if (!selectedSessionName && sessions.length > 0) {
-      setSelectedSessionName(sessions[0].name);
-    }
-  }, [sessions, selectedSessionName, setSelectedSessionName]);
+    const loadSessions = async () => {
+      const list = await window.electronAPI.sessions.list();
+      setSessions(list);
+      if (list.length > 0) {
+        setSelectedId(list[0].id);
+      }
+    };
+    loadSessions();
+  }, []);
 
   useEffect(() => {
-    const loadFiles = async () => {
-      if (!selectedSessionName) return;
+    const fetchFiles = async () => {
+      if (!selectedId) return;
       setLoading(true);
+      setError(null);
+      setStatus(null);
       try {
-        const data = await window.electronAPI.readSessionFiles(selectedSessionName);
-        setFiles(data);
+        const files = await window.electronAPI.files.read(selectedId);
+        setValues({
+          prompts: files.prompts.join('\n'),
+          images: files.imagePrompts.join('\n'),
+          titles: files.titles.join('\n')
+        });
+      } catch (err) {
+        setError((err as Error).message);
       } finally {
         setLoading(false);
       }
     };
-    loadFiles();
-  }, [selectedSessionName]);
+    fetchFiles();
+  }, [selectedId]);
 
-  const lineCounts = {
-    prompts: files.prompts.length,
-    imagePrompts: files.imagePrompts.length,
-    titles: files.titles.length
+  const counts = useMemo(
+    () => ({
+      prompts: lineCount(values.prompts),
+      images: lineCount(values.images),
+      titles: lineCount(values.titles)
+    }),
+    [values]
+  );
+
+  const mismatch = counts.prompts !== counts.titles || counts.images > counts.prompts;
+
+  const handleChange = (key: 'prompts' | 'images' | 'titles', value: string, el?: HTMLTextAreaElement) => {
+    setValues((prev) => ({ ...prev, [key]: value }));
+    if (el) autoResize(el);
   };
 
-  const mismatch =
-    lineCounts.prompts !== lineCounts.titles || lineCounts.imagePrompts > lineCounts.prompts;
-
   const handleSave = async () => {
-    if (!selectedSessionName) return;
+    if (!selectedId) return;
     setSaving(true);
+    setStatus(null);
+    setError(null);
     try {
-      await window.electronAPI.writeSessionFiles(selectedSessionName, files);
-      await refreshSessions();
+      const payload = toArrays(values);
+      const result = await window.electronAPI.files.save(selectedId, payload);
+      if (!result.ok) {
+        setError(result.error || 'Failed to save files');
+      } else {
+        setStatus('Saved successfully');
+      }
+    } catch (err) {
+      setError((err as Error).message);
     } finally {
       setSaving(false);
     }
   };
 
-  const updateField = (key: keyof SessionFiles, value: string) => {
-    setFiles((prev) => ({ ...prev, [key]: value.split(/\r?\n/) }));
-  };
+  const sessionName = sessions.find((s) => s.id === selectedId)?.name ?? 'Unknown';
+
+  const renderColumn = (
+    key: 'prompts' | 'images' | 'titles',
+    label: string,
+    description: string,
+    accent?: string
+  ) => (
+    <div className={`${panelClass} flex flex-col gap-3 p-4`}>
+      <div className="flex items-center justify-between">
+        <div>
+          <div className="text-xs uppercase tracking-wide text-zinc-400">{label}</div>
+          <div className="text-[11px] text-zinc-500">{description}</div>
+        </div>
+        <div className="flex items-center gap-2">
+          <span className={`text-xs font-semibold ${accent ?? 'text-blue-400'}`}>{counts[key]} lines</span>
+          <button
+            onClick={handleSave}
+            disabled={saving || !selectedId}
+            className="rounded-lg border border-blue-500/60 bg-blue-500/10 px-3 py-1 text-xs font-semibold text-blue-100 hover:bg-blue-500/20 disabled:opacity-60"
+          >
+            {saving ? 'Saving…' : 'Save'}
+          </button>
+        </div>
+      </div>
+      <textarea
+        value={values[key]}
+        onChange={(e) => handleChange(key, e.target.value, e.target)}
+        className={textareaClass}
+        placeholder={label}
+        rows={8}
+      />
+    </div>
+  );
 
   return (
     <div className="space-y-4">
       <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
         <div>
-          <h3 className="text-lg font-semibold text-white">Content Editor</h3>
-          <p className="text-sm text-slate-400">Manage prompts, image prompts, and titles per session.</p>
+          <h3 className="text-xl font-semibold text-white">Content Editor</h3>
+          <p className="text-sm text-zinc-400">Edit prompt, image, and title files for each managed session.</p>
         </div>
         <select
-          value={selectedSessionName ?? ''}
-          onChange={(e) => setSelectedSessionName(e.target.value)}
-          className="w-full rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 text-sm text-slate-100 focus:border-emerald-500 focus:outline-none md:w-64"
+          value={selectedId}
+          onChange={(e) => setSelectedId(e.target.value)}
+          className="w-full max-w-xs rounded-xl border border-zinc-700 bg-zinc-900 px-3 py-2 text-sm text-zinc-100 focus:border-blue-500 focus:outline-none"
         >
-          <option value="">Select session</option>
-          {sessionOptions.map((option) => (
-            <option key={option.value} value={option.value}>
-              {option.label}
+          {sessions.length === 0 && <option value="">No sessions configured</option>}
+          {sessions.map((session) => (
+            <option key={session.id} value={session.id}>
+              {session.name || session.id}
             </option>
           ))}
         </select>
       </div>
 
-      {selectedSessionName ? (
-        <div className="space-y-4">
-          {loading && <div className="text-sm text-slate-400">Loading files…</div>}
-          <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
-            <div className="space-y-2">
-              <div className="flex items-center justify-between text-xs text-slate-400">
-                <span>Prompts ({lineCounts.prompts})</span>
-                <span>One per line</span>
-              </div>
-              <textarea
-                value={files.prompts.join('\n')}
-                onChange={(e) => updateField('prompts', e.target.value)}
-                className={textareaClass}
-                placeholder="Enter prompts here..."
-              />
-            </div>
-            <div className="space-y-2">
-              <div className="flex items-center justify-between text-xs text-slate-400">
-                <span>Image Prompts ({lineCounts.imagePrompts})</span>
-                <span>Optional, one per line</span>
-              </div>
-              <textarea
-                value={files.imagePrompts.join('\n')}
-                onChange={(e) => updateField('imagePrompts', e.target.value)}
-                className={textareaClass}
-                placeholder="/path/to/image.png"
-              />
-            </div>
-            <div className="space-y-2">
-              <div className="flex items-center justify-between text-xs text-slate-400">
-                <span>Titles ({lineCounts.titles})</span>
-                <span>One per line</span>
-              </div>
-              <textarea
-                value={files.titles.join('\n')}
-                onChange={(e) => updateField('titles', e.target.value)}
-                className={textareaClass}
-                placeholder="Video title"
-              />
-            </div>
-          </div>
+      {loading && <div className="text-sm text-zinc-500">Loading files…</div>}
+      {error && (
+        <div className="rounded-lg border border-red-500/40 bg-red-500/10 px-3 py-2 text-sm text-red-100">{error}</div>
+      )}
+      {status && (
+        <div className="rounded-lg border border-emerald-500/40 bg-emerald-500/10 px-3 py-2 text-sm text-emerald-100">{status}</div>
+      )}
+
+      {selectedId ? (
+        <>
           {mismatch && (
-            <div className="rounded-lg border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-sm text-amber-100">
-              Warning: Prompts and titles counts differ. Image prompts should not exceed prompt count.
+            <div className="rounded-lg border border-amber-500/40 bg-amber-500/10 px-4 py-3 text-sm text-amber-100">
+              Line counts mismatch for {sessionName}. Titles should match prompts; image prompts should not exceed prompts.
             </div>
           )}
-          <button
-            onClick={handleSave}
-            disabled={saving}
-            className="rounded-lg bg-emerald-600 px-4 py-2 text-sm font-semibold text-white shadow hover:bg-emerald-500 disabled:opacity-50"
-          >
-            {saving ? 'Saving…' : 'Save'}
-          </button>
-        </div>
+
+          <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
+            {renderColumn('prompts', 'prompts.txt', 'One prompt per line', 'text-emerald-400')}
+            {renderColumn('images', 'image_prompts.txt', 'Optional image path/URL per line', 'text-blue-400')}
+            {renderColumn('titles', 'titles.txt', 'One title per line', 'text-purple-300')}
+          </div>
+        </>
       ) : (
-        <div className="rounded-lg border border-dashed border-slate-700 bg-slate-900/40 p-6 text-center text-slate-400">
-          Select a session to edit its content.
+        <div className="rounded-lg border border-dashed border-zinc-700 bg-zinc-900/40 p-6 text-center text-zinc-400">
+          Configure a session and select it to edit its content files.
         </div>
       )}
     </div>

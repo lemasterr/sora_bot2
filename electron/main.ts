@@ -14,6 +14,7 @@ import {
   setActiveChromeProfile
 } from './chromeProfiles';
 import { listManagedSessions, removeManagedSession, saveManagedSession } from './sessionRegistry';
+import { readManagedSessionFiles, writeManagedSessionFiles } from './sessionFiles';
 import type {
   Config,
   DownloadedVideo,
@@ -173,6 +174,22 @@ const registerIpc = () => {
     sessionRunStates.delete(id);
     const saved = await removeManagedSession(id);
     return saved.map((entry) => ({ ...entry, status: sessionRunStates.get(entry.id) || entry.status || 'idle' }));
+  });
+
+  ipcMain.handle('files:read', async (_event, sessionId: string): Promise<SessionFiles> => {
+    return readManagedSessionFiles(sessionId);
+  });
+
+  ipcMain.handle(
+    'files:save',
+    async (_event, sessionId: string, data: SessionFiles): Promise<{ ok: boolean; error?: string }>
+  ) => {
+    try {
+      await writeManagedSessionFiles(sessionId, data);
+      return { ok: true };
+    } catch (error) {
+      return { ok: false, error: (error as Error).message };
+    }
   });
 
   ipcMain.handle('sessions:logs:subscribe', (event, id: string) => {
