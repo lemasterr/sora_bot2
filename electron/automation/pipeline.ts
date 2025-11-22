@@ -34,6 +34,7 @@ export type PipelineStatus = {
 
 let cancelled = false;
 const DEFAULT_TEMPLATE_DATA = { submitted: 0, failed: 0, downloaded: 0 };
+const WATCHDOG_ERROR = 'watchdog_timeout';
 
 function report(onProgress: (status: PipelineStatus) => void, status: PipelineStatus) {
   try {
@@ -85,6 +86,11 @@ export async function runPipeline(
             const result = await runPrompts(session);
             submitted += result.submitted;
             failed += result.failed;
+            if (result.errorCode === WATCHDOG_ERROR) {
+              cancelled = true;
+              report(onProgress, { running: false, currentStepId: step.id, message: 'Watchdog timeout' });
+              break;
+            }
           }
           break;
         }
@@ -94,6 +100,11 @@ export async function runPipeline(
             if (cancelled) break;
             const result = await runDownloads(session, step.limit ?? 0);
             downloaded += result.downloaded;
+            if (result.errorCode === WATCHDOG_ERROR) {
+              cancelled = true;
+              report(onProgress, { running: false, currentStepId: step.id, message: 'Watchdog timeout' });
+              break;
+            }
           }
           break;
         }

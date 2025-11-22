@@ -8,16 +8,20 @@ import { getConfig, type Config } from '../config/config';
 import { getSessionPaths } from '../sessions/repo';
 import type { Session } from '../sessions/types';
 import { formatTemplate, sendTelegramMessage } from '../integrations/telegram';
+import { heartbeat, startWatchdog, stopWatchdog } from './watchdog';
 
 export type DownloadRunResult = {
   ok: boolean;
   downloaded: number;
+  errorCode?: string;
   error?: string;
 };
 
 const CARD_SELECTOR = '.sora-draft-card';
 const DOWNLOAD_BUTTON_SELECTOR = "button[data-testid='download']";
 const DEFAULT_CDP_PORT = 9222;
+const WATCHDOG_TIMEOUT_MS = 120_000;
+const MAX_WATCHDOG_RESTARTS = 2;
 
 type CancelFlag = { cancelled: boolean };
 const cancellationMap = new Map<string, CancelFlag>();
@@ -120,9 +124,13 @@ export async function runDownloads(session: Session, maxVideos: number): Promise
   const cancelFlag: CancelFlag = { cancelled: false };
   cancellationMap.set(session.id, cancelFlag);
 
+  const runId = `download:${session.id}:${Date.now()}`;
   let browser: Browser | null = null;
+  let page: Page | null = null;
   let downloaded = 0;
   let config: Config | null = null;
+  let watchdogTimeouts = 0;
+  let fatalWatchdog = false;
 
   try {
     const [loadedConfig, paths] = await Promise.all([getConfig(), getSessionPaths(session)]);
@@ -135,19 +143,45 @@ export async function runDownloads(session: Session, maxVideos: number): Promise
 
     const cdpPort = session.cdpPort ?? (config as Partial<{ cdpPort: number }>).cdpPort ?? DEFAULT_CDP_PORT;
     browser = await launchBrowserForSession(profile, cdpPort);
-    const page = await preparePage(browser, paths.downloadDir);
 
-    const cards = await page.$$(CARD_SELECTOR);
+    const prepare = async () => {
+      if (!browser) return;
+      if (page) {
+        try {
+          await page.close();
+        } catch {
+          // ignore
+        }
+      }
+      page = await preparePage(browser, paths.downloadDir);
+      heartbeat(runId);
+    };
+
     const titles = await readLines(paths.titlesFile);
 
-    const limit = Math.min(
-      cards.length,
-      titles.length,
-      Number.isFinite(maxVideos) && maxVideos > 0 ? maxVideos : Number.POSITIVE_INFINITY
-    );
+    const onTimeout = async () => {
+      watchdogTimeouts += 1;
+      if (watchdogTimeouts >= MAX_WATCHDOG_RESTARTS) {
+        fatalWatchdog = true;
+        return;
+      }
+      await prepare();
+      setTimeout(() => startWatchdog(runId, WATCHDOG_TIMEOUT_MS, onTimeout), 0);
+    };
 
-    for (let index = 0; index < limit; index += 1) {
+    await prepare();
+    startWatchdog(runId, WATCHDOG_TIMEOUT_MS, onTimeout);
+
+    const limit = (count: number) =>
+      Math.min(count, titles.length, Number.isFinite(maxVideos) && maxVideos > 0 ? maxVideos : Number.POSITIVE_INFINITY);
+
+    for (let index = 0; !fatalWatchdog; index += 1) {
       if (cancelFlag.cancelled) break;
+      if (!page) break;
+
+      heartbeat(runId);
+      const cards = await page.$$(CARD_SELECTOR);
+      if (cards.length === 0 || index >= limit(cards.length)) break;
 
       const card = cards[index];
       const title = titles[index] || `video_${index + 1}`;
@@ -174,7 +208,12 @@ export async function runDownloads(session: Session, maxVideos: number): Promise
         // Continue to next card on error
       }
 
+      heartbeat(runId);
       await page.waitForTimeout(1000);
+    }
+
+    if (fatalWatchdog) {
+      return { ok: false, downloaded, errorCode: 'watchdog_timeout', error: 'Watchdog timeout' };
     }
 
     return { ok: true, downloaded };
@@ -196,6 +235,7 @@ export async function runDownloads(session: Session, maxVideos: number): Promise
     }
     return { ok: false, downloaded, error: message };
   } finally {
+    stopWatchdog(runId);
     cancellationMap.delete(session.id);
     if (browser) {
       try {

@@ -8,11 +8,13 @@ import { getConfig, type Config } from '../config/config';
 import { getSessionPaths } from '../sessions/repo';
 import type { Session } from '../sessions/types';
 import { formatTemplate, sendTelegramMessage } from '../integrations/telegram';
+import { heartbeat, startWatchdog, stopWatchdog } from './watchdog';
 
 export type PromptsRunResult = {
   ok: boolean;
   submitted: number;
   failed: number;
+  errorCode?: string;
   error?: string;
 };
 
@@ -20,6 +22,8 @@ const PROMPT_SELECTOR = "textarea[data-testid='prompt-input']";
 const FILE_INPUT_SELECTOR = "input[type='file']";
 const SUBMIT_SELECTOR = "button[data-testid='submit']";
 const DEFAULT_CDP_PORT = 9222;
+const WATCHDOG_TIMEOUT_MS = 120_000;
+const MAX_WATCHDOG_RESTARTS = 2;
 
 type CancelFlag = { cancelled: boolean };
 const cancellationMap = new Map<string, CancelFlag>();
@@ -65,10 +69,14 @@ export async function runPrompts(session: Session): Promise<PromptsRunResult> {
   const cancelFlag: CancelFlag = { cancelled: false };
   cancellationMap.set(session.id, cancelFlag);
 
+  const runId = `prompts:${session.id}:${Date.now()}`;
   let browser: Browser | null = null;
+  let page: Page | null = null;
   let submitted = 0;
   let failed = 0;
   let config: Config | null = null;
+  let watchdogTimeouts = 0;
+  let fatalWatchdog = false;
 
   try {
     const [loadedConfig, paths] = await Promise.all([getConfig(), getSessionPaths(session)]);
@@ -81,16 +89,41 @@ export async function runPrompts(session: Session): Promise<PromptsRunResult> {
 
     const cdpPort = session.cdpPort ?? (config as Partial<{ cdpPort: number }>).cdpPort ?? DEFAULT_CDP_PORT;
     browser = await launchBrowserForSession(profile, cdpPort);
-    const page = await preparePage(browser);
+    const prepare = async () => {
+      if (!browser) return;
+      if (page) {
+        try {
+          await page.close();
+        } catch {
+          // ignore
+        }
+      }
+      page = await preparePage(browser);
+      heartbeat(runId);
+    };
 
     const prompts = (await readLines(paths.promptsFile)).map((line) => line.trim());
     const imagePrompts = (await readLines(paths.imagePromptsFile)).map((line) => line.trim());
 
-    for (let index = 0; index < prompts.length; index += 1) {
-      if (cancelFlag.cancelled) break;
+    const onTimeout = async () => {
+      watchdogTimeouts += 1;
+      if (watchdogTimeouts >= MAX_WATCHDOG_RESTARTS) {
+        fatalWatchdog = true;
+        return;
+      }
+      await prepare();
+      setTimeout(() => startWatchdog(runId, WATCHDOG_TIMEOUT_MS, onTimeout), 0);
+    };
 
+    await prepare();
+    startWatchdog(runId, WATCHDOG_TIMEOUT_MS, onTimeout);
+
+    for (let index = 0; index < prompts.length; index += 1) {
+      if (cancelFlag.cancelled || fatalWatchdog) break;
+
+      heartbeat(runId);
       const promptText = prompts[index];
-      if (!promptText) continue;
+      if (!promptText || !page) continue;
 
       const imagePath = imagePrompts[index];
 
@@ -108,6 +141,7 @@ export async function runPrompts(session: Session): Promise<PromptsRunResult> {
 
         await page.click(SUBMIT_SELECTOR);
         await page.waitForTimeout(config.promptDelayMs);
+        heartbeat(runId);
 
         submitted += 1;
         await appendLogLine(
@@ -123,6 +157,10 @@ export async function runPrompts(session: Session): Promise<PromptsRunResult> {
           )}`
         );
       }
+    }
+
+    if (fatalWatchdog) {
+      return { ok: false, submitted, failed, errorCode: 'watchdog_timeout', error: 'Watchdog timeout' };
     }
 
     return { ok: true, submitted, failed };
@@ -144,6 +182,7 @@ export async function runPrompts(session: Session): Promise<PromptsRunResult> {
     }
     return { ok: false, submitted, failed, error: message };
   } finally {
+    stopWatchdog(runId);
     cancellationMap.delete(session.id);
     if (browser) {
       try {
