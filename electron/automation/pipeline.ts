@@ -1,8 +1,9 @@
+import { getSession } from "../sessions/repo";
 import { Session } from "../sessions/types";
-import { DownloadStats } from "./downloader";
-import { PromptRunResult } from "./promptsRunner";
+import { runDownloads } from "./downloader";
+import { runPrompts } from "./promptsRunner";
 
-export type PipelineStepType =
+export type StepType =
   | "session_prompts"
   | "session_images"
   | "session_mix"
@@ -14,36 +15,113 @@ export type PipelineStepType =
   | "global_watermark"
   | "global_probe";
 
-export interface PipelineStep {
+export type PipelineStep = {
   id: string;
-  type: PipelineStepType;
-  sessions?: string[];
+  type: StepType;
+  sessionIds?: string[];
   limit?: number;
   group?: string;
-}
+};
 
-export interface PipelineProgress {
-  stepId: string;
-  status: "pending" | "running" | "completed" | "error" | "cancelled";
-  message?: string;
-}
+export type PipelineStatus = {
+  running: boolean;
+  currentStepId: string | null;
+  message: string;
+};
 
-export interface PipelineResult {
-  prompts?: PromptRunResult[];
-  downloads?: DownloadStats[];
-}
+let cancelled = false;
+
+const resolveSessions = async (sessionIds?: string[]): Promise<Session[]> => {
+  if (!sessionIds?.length) return [];
+
+  const sessions: Session[] = [];
+  for (const id of sessionIds) {
+    const session = await getSession(id);
+    if (session) {
+      sessions.push(session);
+    }
+  }
+  return sessions;
+};
+
+const reportStatus = (onProgress: (status: PipelineStatus) => void, status: PipelineStatus): void => {
+  try {
+    onProgress(status);
+  } catch {
+    // ignore listener errors
+  }
+};
+
+export const cancelPipeline = (): void => {
+  cancelled = true;
+};
 
 export const runPipeline = async (
-  _steps: PipelineStep[],
-  _sessionLookup: (id: string) => Session | null,
-): Promise<PipelineResult> => {
-  throw new Error("Not implemented");
-};
+  steps: PipelineStep[],
+  onProgress: (status: PipelineStatus) => void,
+): Promise<void> => {
+  cancelled = false;
+  reportStatus(onProgress, { running: true, currentStepId: null, message: "Starting pipeline" });
 
-export const stopPipeline = async (): Promise<void> => {
-  throw new Error("Not implemented");
-};
+  for (const step of steps) {
+    if (cancelled) break;
 
-export const onPipelineProgress = (_listener: (progress: PipelineProgress) => void): void => {
-  void _listener;
+    reportStatus(onProgress, {
+      running: true,
+      currentStepId: step.id,
+      message: `Running step ${step.type}`,
+    });
+
+    try {
+      switch (step.type) {
+        case "session_prompts": {
+          const sessions = await resolveSessions(step.sessionIds);
+          for (const session of sessions) {
+            if (cancelled) break;
+            await runPrompts(session);
+          }
+          break;
+        }
+        case "session_download": {
+          const sessions = await resolveSessions(step.sessionIds);
+          for (const session of sessions) {
+            if (cancelled) break;
+            await runDownloads(session, step.limit ?? Number.POSITIVE_INFINITY);
+          }
+          break;
+        }
+        case "session_watermark":
+        case "session_images":
+        case "session_mix":
+        case "session_chrome":
+        case "global_blur":
+        case "global_merge":
+        case "global_watermark":
+        case "global_probe":
+          // Placeholder for future implementations
+          break;
+        default:
+          break;
+      }
+
+      reportStatus(onProgress, {
+        running: !cancelled,
+        currentStepId: cancelled ? null : step.id,
+        message: cancelled ? "Pipeline cancelled" : `Completed step ${step.type}`,
+      });
+    } catch (error: any) {
+      reportStatus(onProgress, {
+        running: false,
+        currentStepId: step.id,
+        message: `Error in step ${step.type}: ${error?.message ?? String(error)}`,
+      });
+      return;
+    }
+  }
+
+  reportStatus(onProgress, {
+    running: false,
+    currentStepId: null,
+    message: cancelled ? "Pipeline cancelled" : "Pipeline completed",
+  });
 };
