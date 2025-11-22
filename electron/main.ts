@@ -10,6 +10,7 @@ import { testTelegram, sendTelegramMessage } from "./integrations/telegram";
 import { deleteSession, getSession, listSessions, saveSession } from "./sessions/repo";
 import { loggerEvents } from "./logging/logger";
 import { logInfo } from "./logging/logger";
+import { exportHistory } from "./logging/history";
 import { Session } from "./sessions/types";
 
 export interface MainWindowContext {
@@ -108,6 +109,8 @@ export const registerIpcHandlers = (ipc: IpcMain, ctx: MainWindowContext): void 
 
   ipc.handle("telegram:test", async () => testTelegram());
   ipc.handle("telegram:sendMessage", async (_event, text: string) => sendTelegramMessage(text));
+
+  ipc.handle("logging:export", async () => exportHistory());
 };
 
 export const registerAppEvents = (): void => {

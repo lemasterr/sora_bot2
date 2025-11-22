@@ -67,7 +67,12 @@ const api = {
     // Legacy alias
     subscribe: (listener: (entry: unknown) => void): Unsubscribe =>
       withListener("logging:entry", listener),
-    export: async () => ({ ok: false, error: "Export not implemented" }),
+    export: async () => ipcRenderer.invoke("logging:export"),
+  },
+  logs: {
+    subscribe: (listener: (entry: unknown) => void): Unsubscribe =>
+      withListener("logging:entry", listener),
+    export: async () => ipcRenderer.invoke("logging:export"),
   },
   // Legacy top-level conveniences used by renderer prior to IPC namespacing
   getSessions: () => ipcRenderer.invoke("sessions:list"),

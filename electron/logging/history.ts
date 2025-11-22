@@ -32,3 +32,25 @@ export const appendHistory = async (record: any): Promise<void> => {
   await rotateIfNeeded(filePath, Buffer.byteLength(line, "utf-8"));
   await fs.appendFile(filePath, line, "utf-8");
 };
+
+export const exportHistory = async (): Promise<{ ok: boolean; path?: string; error?: string }> => {
+  try {
+    const historyPath = getHistoryPath();
+    const targetDir = app.getPath("documents");
+    const targetPath = path.join(targetDir, `sora-logs-${Date.now()}.jsonl`);
+
+    await fs.mkdir(targetDir, { recursive: true }).catch(() => undefined);
+    await fs.copyFile(historyPath, targetPath).catch(async (error: any) => {
+      if (error?.code === "ENOENT") {
+        await fs.writeFile(historyPath, "", "utf-8");
+        await fs.writeFile(targetPath, "", "utf-8");
+      } else {
+        throw error;
+      }
+    });
+
+    return { ok: true, path: targetPath };
+  } catch (error: any) {
+    return { ok: false, error: error?.message ?? "Failed to export logs" };
+  }
+};
