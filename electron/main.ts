@@ -21,7 +21,7 @@ const isPackaged = app.isPackaged;
 const getPreloadPath = (): string =>
   isPackaged
     ? path.join(__dirname, "preload.js")
-    : path.join(__dirname, "preload.ts");
+    : path.join(__dirname, "dev-preload.js");
 
 const getRendererUrl = (): string => {
   if (process.env.NODE_ENV === "development") {
