@@ -6,6 +6,7 @@ export const SettingsPage: React.FC = () => {
   const { config, refreshConfig, setConfig } = useAppStore();
   const [draft, setDraft] = useState<Config | null>(config);
   const [status, setStatus] = useState('');
+  const [testStatus, setTestStatus] = useState('');
   const [profiles, setProfiles] = useState<ChromeProfile[]>([]);
   const [editingProfile, setEditingProfile] = useState<ChromeProfile | null>(null);
 
@@ -71,6 +72,17 @@ export const SettingsPage: React.FC = () => {
     refreshConfig();
   };
 
+  const sendTestMessage = async () => {
+    if (!window.electronAPI?.telegramTest) return;
+    setTestStatus('Sending...');
+    const result = await window.electronAPI.telegramTest();
+    if (result.ok) {
+      setTestStatus('Test message sent');
+    } else {
+      setTestStatus(`Error: ${result.error ?? 'Failed to send'}`);
+    }
+  };
+
   const startEditProfile = (profile: ChromeProfile) => {
     setEditingProfile({ ...profile });
   };
@@ -89,96 +101,292 @@ export const SettingsPage: React.FC = () => {
   }
 
   return (
-    <div className="space-y-4">
+    <div className="space-y-5">
       <div>
         <h3 className="text-lg font-semibold text-white">Settings</h3>
-        <p className="text-sm text-slate-400">Configure paths and operational limits.</p>
+        <p className="text-sm text-slate-400">Configure paths, automation timings, and integration tokens.</p>
       </div>
 
-      <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
-        <div className="space-y-3 rounded-xl border border-slate-800 bg-slate-900/60 p-4">
-          <h4 className="text-sm font-semibold text-white">Directories</h4>
-          <div>
-            <label className="text-xs text-slate-400">Sessions root</label>
+      <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
+        <div className="space-y-3 rounded-xl border border-zinc-800 bg-zinc-900/70 p-4">
+          <div className="flex items-center justify-between">
+            <div>
+              <h4 className="text-sm font-semibold text-white">Chrome</h4>
+              <p className="text-xs text-zinc-400">Executable, user data dir, and active profile.</p>
+            </div>
+            <button
+              onClick={scanProfiles}
+              className="rounded-lg border border-blue-500/60 bg-blue-500/20 px-3 py-2 text-xs font-semibold text-blue-100 transition hover:bg-blue-500/30"
+            >
+              Scan Profiles
+            </button>
+          </div>
+
+          <div className="space-y-2">
+            <label className="text-xs text-zinc-400">Chrome executable</label>
+            <input
+              value={draft.chromeExecutablePath}
+              onChange={(e) => updateField('chromeExecutablePath', e.target.value)}
+              className="w-full rounded-lg border border-zinc-700 bg-zinc-950 px-3 py-2 text-sm text-zinc-100 focus:border-blue-500 focus:outline-none"
+              placeholder="/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"
+            />
+          </div>
+          <div className="space-y-2">
+            <label className="text-xs text-zinc-400">user-data-dir</label>
+            <input
+              value={draft.chromeUserDataDir ?? ''}
+              onChange={(e) => updateField('chromeUserDataDir', e.target.value)}
+              className="w-full rounded-lg border border-zinc-700 bg-zinc-950 px-3 py-2 text-sm text-zinc-100 focus:border-blue-500 focus:outline-none"
+              placeholder="~/Library/Application Support/Google/Chrome"
+            />
+          </div>
+          <div className="space-y-2">
+            <label className="text-xs text-zinc-400">Active profile</label>
+            <select
+              value={draft.activeChromeProfile ?? ''}
+              onChange={(e) => setActiveProfile(e.target.value)}
+              className="w-full rounded-lg border border-zinc-700 bg-zinc-950 px-3 py-2 text-sm text-zinc-100 focus:border-blue-500 focus:outline-none"
+            >
+              <option value="">Select profile</option>
+              {profiles.map((p) => (
+                <option key={p.name} value={p.name}>
+                  {p.name}
+                </option>
+              ))}
+            </select>
+          </div>
+        </div>
+
+        <div className="space-y-3 rounded-xl border border-zinc-800 bg-zinc-900/70 p-4">
+          <h4 className="text-sm font-semibold text-white">Sessions</h4>
+          <p className="text-xs text-zinc-400">Root directory and cleanup options.</p>
+          <div className="space-y-2">
+            <label className="text-xs text-zinc-400">Sessions root directory</label>
             <div className="mt-1 flex gap-2">
               <input
                 value={draft.sessionsRoot}
                 onChange={(e) => updateField('sessionsRoot', e.target.value)}
-                className="flex-1 rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-slate-100 focus:border-emerald-500 focus:outline-none"
+                className="flex-1 rounded-lg border border-zinc-700 bg-zinc-950 px-3 py-2 text-sm text-zinc-100 focus:border-blue-500 focus:outline-none"
               />
               <button
                 onClick={browseSessions}
-                className="rounded-lg border border-slate-700 px-3 py-2 text-sm text-slate-100 hover:border-emerald-500 hover:text-emerald-200"
+                className="rounded-lg border border-zinc-700 px-3 py-2 text-sm font-semibold text-zinc-100 hover:border-blue-500 hover:text-blue-100"
               >
                 Browse…
               </button>
             </div>
           </div>
+          <div className="flex flex-col gap-2 text-xs text-zinc-200">
+            <label className="inline-flex items-center gap-2">
+              <input
+                type="checkbox"
+                checked={draft.autoCleanupDownloads ?? false}
+                onChange={(e) => updateField('autoCleanupDownloads', e.target.checked)}
+                className="h-4 w-4 rounded border-zinc-700 bg-zinc-950 text-blue-500 focus:ring-blue-500"
+              />
+              Auto-clean old downloads
+            </label>
+            <label className="inline-flex items-center gap-2">
+              <input
+                type="checkbox"
+                checked={draft.autoCleanupProfiles ?? false}
+                onChange={(e) => updateField('autoCleanupProfiles', e.target.checked)}
+                className="h-4 w-4 rounded border-zinc-700 bg-zinc-950 text-blue-500 focus:ring-blue-500"
+              />
+              Auto-clean unused profiles
+            </label>
+          </div>
         </div>
 
-        <div className="space-y-3 rounded-xl border border-slate-800 bg-slate-900/60 p-4">
-          <h4 className="text-sm font-semibold text-white">Executables</h4>
-          <div>
-            <label className="text-xs text-slate-400">Chrome path</label>
-            <input
-              value={draft.chromeExecutablePath}
-              onChange={(e) => updateField('chromeExecutablePath', e.target.value)}
-              className="mt-1 w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-slate-100 focus:border-emerald-500 focus:outline-none"
-            />
-          </div>
-          <div>
-            <label className="text-xs text-slate-400">ffmpeg path</label>
+        <div className="space-y-3 rounded-xl border border-zinc-800 bg-zinc-900/70 p-4">
+          <h4 className="text-sm font-semibold text-white">FFmpeg</h4>
+          <p className="text-xs text-zinc-400">Binary path and encoding defaults.</p>
+          <div className="space-y-2">
+            <label className="text-xs text-zinc-400">ffmpeg binary</label>
             <input
               value={draft.ffmpegPath}
               onChange={(e) => updateField('ffmpegPath', e.target.value)}
-              className="mt-1 w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-slate-100 focus:border-emerald-500 focus:outline-none"
+              className="w-full rounded-lg border border-zinc-700 bg-zinc-950 px-3 py-2 text-sm text-zinc-100 focus:border-blue-500 focus:outline-none"
             />
+          </div>
+          <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
+            <div className="space-y-2">
+              <label className="text-xs text-zinc-400">vcodec</label>
+              <input
+                value={draft.ffmpegVcodec ?? ''}
+                onChange={(e) => updateField('ffmpegVcodec', e.target.value)}
+                className="w-full rounded-lg border border-zinc-700 bg-zinc-950 px-3 py-2 text-sm text-zinc-100 focus:border-blue-500 focus:outline-none"
+              />
+            </div>
+            <div className="space-y-2">
+              <label className="text-xs text-zinc-400">crf</label>
+              <input
+                type="number"
+                value={draft.ffmpegCrf ?? 0}
+                onChange={(e) => updateField('ffmpegCrf', Number(e.target.value))}
+                className="w-full rounded-lg border border-zinc-700 bg-zinc-950 px-3 py-2 text-sm text-zinc-100 focus:border-blue-500 focus:outline-none"
+              />
+            </div>
+            <div className="space-y-2">
+              <label className="text-xs text-zinc-400">preset</label>
+              <input
+                value={draft.ffmpegPreset ?? ''}
+                onChange={(e) => updateField('ffmpegPreset', e.target.value)}
+                className="w-full rounded-lg border border-zinc-700 bg-zinc-950 px-3 py-2 text-sm text-zinc-100 focus:border-blue-500 focus:outline-none"
+              />
+            </div>
           </div>
         </div>
 
-        <div className="space-y-3 rounded-xl border border-slate-800 bg-slate-900/60 p-4">
-          <h4 className="text-sm font-semibold text-white">Timings (ms)</h4>
+        <div className="space-y-3 rounded-xl border border-zinc-800 bg-zinc-900/70 p-4">
+          <h4 className="text-sm font-semibold text-white">Watermark Cleaner</h4>
+          <p className="text-xs text-zinc-400">Template matching and frame extraction defaults.</p>
+          <div className="space-y-2">
+            <label className="text-xs text-zinc-400">Template path</label>
+            <input
+              value={draft.watermarkTemplatePath ?? ''}
+              onChange={(e) => updateField('watermarkTemplatePath', e.target.value)}
+              className="w-full rounded-lg border border-zinc-700 bg-zinc-950 px-3 py-2 text-sm text-zinc-100 focus:border-blue-500 focus:outline-none"
+              placeholder="/path/to/template.png"
+            />
+          </div>
           <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
-            <div>
-              <label className="text-xs text-slate-400">Prompt delay</label>
+            <div className="space-y-2">
+              <label className="text-xs text-zinc-400">Confidence</label>
+              <input
+                type="number"
+                step="0.05"
+                min="0"
+                max="1"
+                value={draft.watermarkConfidence ?? 0}
+                onChange={(e) => updateField('watermarkConfidence', Number(e.target.value))}
+                className="w-full rounded-lg border border-zinc-700 bg-zinc-950 px-3 py-2 text-sm text-zinc-100 focus:border-blue-500 focus:outline-none"
+              />
+            </div>
+            <div className="space-y-2">
+              <label className="text-xs text-zinc-400">Frames</label>
+              <input
+                type="number"
+                value={draft.watermarkFrames ?? 0}
+                onChange={(e) => updateField('watermarkFrames', Number(e.target.value))}
+                className="w-full rounded-lg border border-zinc-700 bg-zinc-950 px-3 py-2 text-sm text-zinc-100 focus:border-blue-500 focus:outline-none"
+              />
+            </div>
+            <div className="space-y-2">
+              <label className="text-xs text-zinc-400">Downscale</label>
+              <input
+                type="number"
+                value={draft.watermarkDownscale ?? 1}
+                onChange={(e) => updateField('watermarkDownscale', Number(e.target.value))}
+                className="w-full rounded-lg border border-zinc-700 bg-zinc-950 px-3 py-2 text-sm text-zinc-100 focus:border-blue-500 focus:outline-none"
+              />
+            </div>
+          </div>
+        </div>
+
+        <div className="space-y-3 rounded-xl border border-zinc-800 bg-zinc-900/70 p-4">
+          <h4 className="text-sm font-semibold text-white">Automator</h4>
+          <p className="text-xs text-zinc-400">Default pacing and retry behavior.</p>
+          <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
+            <div className="space-y-2">
+              <label className="text-xs text-zinc-400">Prompt delay (ms)</label>
               <input
                 type="number"
                 value={draft.promptDelayMs}
                 onChange={(e) => updateField('promptDelayMs', Number(e.target.value))}
-                className="mt-1 w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-slate-100 focus:border-emerald-500 focus:outline-none"
+                className="w-full rounded-lg border border-zinc-700 bg-zinc-950 px-3 py-2 text-sm text-zinc-100 focus:border-blue-500 focus:outline-none"
               />
             </div>
-            <div>
-              <label className="text-xs text-slate-400">Draft timeout</label>
+            <div className="space-y-2">
+              <label className="text-xs text-zinc-400">Step delay (ms)</label>
+              <input
+                type="number"
+                value={draft.automatorDelayMs ?? 0}
+                onChange={(e) => updateField('automatorDelayMs', Number(e.target.value))}
+                className="w-full rounded-lg border border-zinc-700 bg-zinc-950 px-3 py-2 text-sm text-zinc-100 focus:border-blue-500 focus:outline-none"
+              />
+            </div>
+            <div className="space-y-2">
+              <label className="text-xs text-zinc-400">Retries</label>
+              <input
+                type="number"
+                value={draft.automatorRetryCount ?? 0}
+                onChange={(e) => updateField('automatorRetryCount', Number(e.target.value))}
+                className="w-full rounded-lg border border-zinc-700 bg-zinc-950 px-3 py-2 text-sm text-zinc-100 focus:border-blue-500 focus:outline-none"
+              />
+            </div>
+          </div>
+          <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
+            <div className="space-y-2">
+              <label className="text-xs text-zinc-400">Draft timeout (ms)</label>
               <input
                 type="number"
                 value={draft.draftTimeoutMs}
                 onChange={(e) => updateField('draftTimeoutMs', Number(e.target.value))}
-                className="mt-1 w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-slate-100 focus:border-emerald-500 focus:outline-none"
+                className="w-full rounded-lg border border-zinc-700 bg-zinc-950 px-3 py-2 text-sm text-zinc-100 focus:border-blue-500 focus:outline-none"
               />
             </div>
-            <div>
-              <label className="text-xs text-slate-400">Download timeout</label>
+            <div className="space-y-2">
+              <label className="text-xs text-zinc-400">Download timeout (ms)</label>
               <input
                 type="number"
                 value={draft.downloadTimeoutMs}
                 onChange={(e) => updateField('downloadTimeoutMs', Number(e.target.value))}
-                className="mt-1 w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-slate-100 focus:border-emerald-500 focus:outline-none"
+                className="w-full rounded-lg border border-zinc-700 bg-zinc-950 px-3 py-2 text-sm text-zinc-100 focus:border-blue-500 focus:outline-none"
+              />
+            </div>
+            <div className="space-y-2">
+              <label className="text-xs text-zinc-400">Max parallel sessions</label>
+              <input
+                type="number"
+                value={draft.maxParallelSessions}
+                onChange={(e) => updateField('maxParallelSessions', Number(e.target.value))}
+                className="w-full rounded-lg border border-zinc-700 bg-zinc-950 px-3 py-2 text-sm text-zinc-100 focus:border-blue-500 focus:outline-none"
               />
             </div>
           </div>
         </div>
 
-        <div className="space-y-3 rounded-xl border border-slate-800 bg-slate-900/60 p-4">
-          <h4 className="text-sm font-semibold text-white">Limits</h4>
-          <div>
-            <label className="text-xs text-slate-400">Max parallel sessions</label>
-            <input
-              type="number"
-              value={draft.maxParallelSessions}
-              onChange={(e) => updateField('maxParallelSessions', Number(e.target.value))}
-              className="mt-1 w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-slate-100 focus:border-emerald-500 focus:outline-none"
-            />
+        <div className="space-y-3 rounded-xl border border-zinc-800 bg-zinc-900/70 p-4">
+          <h4 className="text-sm font-semibold text-white">Telegram</h4>
+          <p className="text-xs text-zinc-400">Bot credentials and test trigger.</p>
+          <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
+            <div className="space-y-2">
+              <label className="text-xs text-zinc-400">bot_token</label>
+              <input
+                value={draft.telegramBotToken ?? ''}
+                onChange={(e) => updateField('telegramBotToken', e.target.value)}
+                className="w-full rounded-lg border border-zinc-700 bg-zinc-950 px-3 py-2 text-sm text-zinc-100 focus:border-blue-500 focus:outline-none"
+              />
+            </div>
+            <div className="space-y-2">
+              <label className="text-xs text-zinc-400">chat_id</label>
+              <input
+                value={draft.telegramChatId ?? ''}
+                onChange={(e) => updateField('telegramChatId', e.target.value)}
+                className="w-full rounded-lg border border-zinc-700 bg-zinc-950 px-3 py-2 text-sm text-zinc-100 focus:border-blue-500 focus:outline-none"
+              />
+            </div>
+          </div>
+          <div className="flex flex-col gap-2 text-xs text-zinc-200">
+            <label className="inline-flex items-center gap-2">
+              <input
+                type="checkbox"
+                checked={draft.autoSendDownloads ?? false}
+                onChange={(e) => updateField('autoSendDownloads', e.target.checked)}
+                className="h-4 w-4 rounded border-zinc-700 bg-zinc-950 text-blue-500 focus:ring-blue-500"
+              />
+              Auto-send downloaded videos
+            </label>
+            <div className="flex items-center gap-3">
+              <button
+                onClick={sendTestMessage}
+                className="rounded-lg border border-emerald-500/60 bg-emerald-500/10 px-3 py-2 text-xs font-semibold text-emerald-100 transition hover:bg-emerald-500/20"
+              >
+                Send test message
+              </button>
+              {testStatus && <span className="text-[11px] text-zinc-400">{testStatus}</span>}
+            </div>
           </div>
         </div>
       </div>
@@ -304,13 +512,15 @@ export const SettingsPage: React.FC = () => {
         </div>
       </div>
 
-      <button
-        onClick={save}
-        className="rounded-lg bg-emerald-600 px-4 py-2 text-sm font-semibold text-white shadow hover:bg-emerald-500"
-      >
-        Save Settings
-      </button>
-      {status && <div className="text-xs text-slate-400">{status}</div>}
+      <div className="flex items-center gap-3">
+        <button
+          onClick={save}
+          className="rounded-lg bg-emerald-600 px-4 py-2 text-sm font-semibold text-white shadow hover:bg-emerald-500"
+        >
+          Save Settings
+        </button>
+        {status && <div className="text-xs text-slate-400">{status}</div>}
+      </div>
     </div>
   );
 };

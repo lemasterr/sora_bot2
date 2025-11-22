@@ -1,14 +1,26 @@
 export interface Config {
   sessionsRoot: string;
   chromeExecutablePath: string;
+  chromeUserDataDir?: string;
   ffmpegPath: string;
+  ffmpegVcodec?: string;
+  ffmpegCrf?: number;
+  ffmpegPreset?: string;
   promptDelayMs: number;
+  automatorDelayMs?: number;
   draftTimeoutMs: number;
   downloadTimeoutMs: number;
   maxParallelSessions: number;
+  automatorRetryCount?: number;
   telegramBotToken?: string;
   telegramChatId?: string;
   autoSendDownloads?: boolean;
+  autoCleanupDownloads?: boolean;
+  autoCleanupProfiles?: boolean;
+  watermarkTemplatePath?: string;
+  watermarkConfidence?: number;
+  watermarkFrames?: number;
+  watermarkDownscale?: number;
   chromeProfiles?: ChromeProfile[];
   activeChromeProfile?: string;
   sessions?: ManagedSession[];
