@@ -2,12 +2,13 @@ import fs from 'fs/promises';
 import os from 'os';
 import path from 'path';
 import { getConfig, updateConfig } from '../config/config';
-import { logError, logInfo, logWarn } from '../logging/logger';
+import { logError, logInfo } from '../logging/logger';
 
 export type ChromeProfile = {
   name: string;
   userDataDir: string;
-  profileDir: string;
+  profileDirectory: string;
+  profileDir?: string;
   isActive?: boolean;
 };
 
@@ -23,25 +24,28 @@ async function dirExists(candidate: string): Promise<boolean> {
   }
 }
 
-function getBaseCandidatePaths(configuredPath?: string | null): string[] {
+export function discoverChromeProfileRoots(): string[] {
   const home = os.homedir();
-  const candidates = new Set<string>();
+  const candidates: string[] = [];
 
-  if (configuredPath) {
-    candidates.add(path.resolve(configuredPath));
-  }
-
-  if (process.platform === 'win32') {
-    const localAppData = process.env.LOCALAPPDATA || path.join(home, 'AppData', 'Local');
-    candidates.add(path.join(localAppData, 'Google', 'Chrome', 'User Data'));
-  } else if (process.platform === 'darwin') {
-    candidates.add(path.join(home, 'Library', 'Application Support', 'Google', 'Chrome'));
+  if (process.platform === 'darwin') {
+    candidates.push(path.join(home, 'Library', 'Application Support', 'Google', 'Chrome'));
+  } else if (process.platform.startsWith('win')) {
+    const envVars = ['LOCALAPPDATA', 'APPDATA', 'USERPROFILE'] as const;
+    for (const envVar of envVars) {
+      const base = process.env[envVar];
+      if (!base) continue;
+      const candidate = path.join(base, 'Google', 'Chrome', 'User Data');
+      if (!candidates.includes(candidate)) {
+        candidates.push(candidate);
+      }
+    }
   } else {
-    candidates.add(path.join(home, '.config', 'google-chrome'));
-    candidates.add(path.join(home, '.config', 'chromium'));
+    candidates.push(path.join(home, '.config', 'google-chrome'));
+    candidates.push(path.join(home, '.config', 'chromium'));
   }
 
-  return Array.from(candidates);
+  return candidates;
 }
 
 async function collectProfiles(basePath: string): Promise<ChromeProfile[]> {
@@ -49,15 +53,21 @@ async function collectProfiles(basePath: string): Promise<ChromeProfile[]> {
 
   const entries = await fs.readdir(basePath, { withFileTypes: true });
   const allowedNames = ['Default', 'Guest Profile'];
-  return entries
-    .filter((entry) =>
-      entry.isDirectory() && (allowedNames.includes(entry.name) || entry.name.startsWith('Profile '))
-    )
-    .map<ChromeProfile>((entry) => ({
+  const results: ChromeProfile[] = [];
+
+  for (const entry of entries) {
+    if (!entry.isDirectory()) continue;
+    if (!(allowedNames.includes(entry.name) || entry.name.startsWith('Profile '))) continue;
+
+    results.push({
       name: entry.name,
       userDataDir: basePath,
+      profileDirectory: entry.name,
       profileDir: entry.name,
-    }));
+    });
+  }
+
+  return results;
 }
 
 function annotateActive(profiles: ChromeProfile[], activeName?: string | null): ChromeProfile[] {
@@ -69,43 +79,23 @@ function annotateActive(profiles: ChromeProfile[], activeName?: string | null): 
 
 export async function scanChromeProfiles(): Promise<ChromeProfile[]> {
   const config = await getConfig();
-  const bases = getBaseCandidatePaths(config.chromeUserDataDir);
+  const bases = discoverChromeProfileRoots();
   const results: ChromeProfile[] = [];
-  let configuredPathError: Error | null = null;
 
   for (const base of bases) {
     try {
-      const exists = await dirExists(base);
-      if (!exists) {
-        if (config.chromeUserDataDir && path.resolve(config.chromeUserDataDir) === path.resolve(base)) {
-          configuredPathError = new Error(`Configured Chrome user data directory not found: ${base}`);
-        }
-        logWarn('chromeProfiles', `Chrome user data directory missing: ${base}`);
-        continue;
-      }
-
-      logInfo('chromeProfiles', `Scanning Chrome profiles in ${base}`);
-      const profiles = await collectProfiles(base);
-      logInfo('chromeProfiles', `Found ${profiles.length} Chrome profiles in ${base}`);
-
+      const expanded = base.replace(/^~(\\|\/)/, `${os.homedir()}$1`);
+      const profiles = await collectProfiles(expanded);
+      logInfo('chromeProfiles', `Found ${profiles.length} Chrome profiles in ${expanded}`);
       for (const profile of profiles) {
-        const key = `${profile.userDataDir}::${profile.profileDir}`;
-        const existing = results.find((p) => `${p.userDataDir}::${p.profileDir}` === key);
-        if (!existing) {
+        const key = `${profile.userDataDir}::${profile.profileDirectory}`;
+        if (!results.find((p) => `${p.userDataDir}::${p.profileDirectory}` === key)) {
           results.push(profile);
         }
       }
     } catch (error) {
-      if ((error as NodeJS.ErrnoException)?.code === 'ENOENT') {
-        logWarn('chromeProfiles', `Chrome user data directory not accessible: ${base}`);
-        continue;
-      }
       logError('chromeProfiles', `Failed to scan ${base}: ${(error as Error).message}`);
     }
-  }
-
-  if (results.length === 0 && configuredPathError) {
-    throw configuredPathError;
   }
 
   cachedProfiles = results;

@@ -234,7 +234,7 @@ export const SessionsPage: React.FC = () => {
                 <option value="">Select profile</option>
                 {profiles.map((profile) => (
                   <option key={profile.name} value={profile.name}>
-                    {profile.name} ({profile.profileDir})
+                    {profile.name} ({profile.profileDirectory ?? profile.profileDir})
                   </option>
                 ))}
               </select>

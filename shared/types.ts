@@ -38,7 +38,8 @@ export interface Config {
 export interface ChromeProfile {
   name: string;
   userDataDir: string;
-  profileDir: string;
+  profileDirectory: string;
+  profileDir?: string;
   isActive?: boolean;
 }
 

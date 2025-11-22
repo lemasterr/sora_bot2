@@ -14,6 +14,14 @@ const DEFAULT_CONFIG: Config = {
   activeChromeProfile: '',
 };
 
+
+const normalizeProfiles = (profilesList: ChromeProfile[]): ChromeProfile[] =>
+  profilesList.map((p) => ({
+    ...p,
+    profileDirectory: (p as any).profileDirectory ?? (p as any).profileDir ?? p.name,
+    profileDir: (p as any).profileDir ?? (p as any).profileDirectory ?? p.name,
+  }));
+
 export const SettingsPage: React.FC = () => {
   const { config, refreshConfig, setConfig } = useAppStore();
   const [draft, setDraft] = useState<Config | null>(config ?? DEFAULT_CONFIG);
@@ -49,17 +57,17 @@ export const SettingsPage: React.FC = () => {
       throw new Error('Chrome profile API unavailable');
     }
 
-    if (Array.isArray(result)) return result;
+    if (Array.isArray(result)) return normalizeProfiles(result);
     if (typeof result === 'object') {
       if ('ok' in result) {
         if ((result as any).ok) {
-          return ((result as any).profiles as ChromeProfile[]) ?? [];
+          return normalizeProfiles(((result as any).profiles as ChromeProfile[]) ?? []);
         }
         throw new Error((result as any).error ?? 'Failed to load Chrome profiles');
       }
 
       if ('profiles' in result && Array.isArray((result as any).profiles)) {
-        return (result as any).profiles as ChromeProfile[];
+        return normalizeProfiles((result as any).profiles as ChromeProfile[]);
       }
     }
 
@@ -183,7 +191,7 @@ export const SettingsPage: React.FC = () => {
   };
 
   const startCreateProfile = () => {
-    setEditingProfile({ name: 'Custom Profile', userDataDir: '', profileDir: '' });
+    setEditingProfile({ name: 'Custom Profile', userDataDir: '', profileDirectory: '', profileDir: '' });
   };
 
   useEffect(() => {
@@ -541,8 +549,14 @@ export const SettingsPage: React.FC = () => {
               <div>
                 <label className="text-xs text-zinc-400">Profile Dir</label>
                 <input
-                  value={editingProfile.profileDir}
-                  onChange={(e) => setEditingProfile({ ...editingProfile, profileDir: e.target.value })}
+                  value={editingProfile.profileDirectory ?? editingProfile.profileDir ?? ''}
+                  onChange={(e) =>
+                    setEditingProfile({
+                      ...editingProfile,
+                      profileDirectory: e.target.value,
+                      profileDir: e.target.value,
+                    })
+                  }
                   className="mt-1 w-full rounded-md border border-zinc-700 bg-zinc-900 px-3 py-2 text-sm text-zinc-100 focus:border-blue-500 focus:outline-none"
                 />
               </div>
@@ -590,7 +604,7 @@ export const SettingsPage: React.FC = () => {
                 </div>
                 <div>
                   <span className="font-semibold text-zinc-300">profile-directory:</span>
-                  <div className="truncate text-[11px] text-zinc-400">{profile.profileDir}</div>
+                  <div className="truncate text-[11px] text-zinc-400">{profile.profileDirectory ?? profile.profileDir}</div>
                 </div>
               </div>
               <div className="mt-4 flex gap-2 text-xs">

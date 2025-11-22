@@ -44,6 +44,7 @@ const listProfileDirs = async (userDataDir: string): Promise<ChromeProfile[]> =>
       profiles.push({
         name,
         userDataDir,
+        profileDirectory: name,
         profileDir: path.join(userDataDir, name)
       });
     }
@@ -57,7 +58,7 @@ export const scanChromeProfiles = async (): Promise<ChromeProfile[]> => {
   for (const dir of chromeDirCandidates()) {
     const profiles = await listProfileDirs(dir);
     for (const profile of profiles) {
-      if (!found.some((p) => p.profileDir === profile.profileDir)) {
+      if (!found.some((p) => (p.profileDir ?? p.profileDirectory) === (profile.profileDir ?? profile.profileDirectory))) {
         found.push(profile);
       }
     }
