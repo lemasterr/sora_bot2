@@ -2,7 +2,7 @@ import { app, BrowserWindow, ipcMain, dialog } from 'electron';
 import path from 'path';
 import { loadConfig, saveConfig } from './config';
 import { SessionManager } from './sessionManager';
-import { cancelSessionRun, runDownloads, runPrompts } from './automation/sessionAutomation';
+import { cancelSessionRun, openDrafts, runDownloads, runPrompts, scanDrafts } from './automation/sessionAutomation';
 import { setChromeExecutablePath, type SessionRunContext } from './automation/chromeController';
 import { generateWatermarkFrames } from './watermark';
 import { sendTestMessage } from './telegram';
@@ -472,6 +472,30 @@ const registerIpc = () => {
       return handleAutomation(async () => {
         const ctx = await buildSessionContext(sessionName);
         return runDownloads(ctx, maxVideos);
+      });
+    }
+  );
+
+  ipcMain.handle('downloader:open-drafts', async (_event, sessionName: string): Promise<RunResult> => {
+    return handleAutomation(async () => {
+      const ctx = await buildSessionContext(sessionName);
+      return openDrafts(ctx);
+    });
+  });
+
+  ipcMain.handle('downloader:scan', async (_event, sessionName: string): Promise<RunResult> => {
+    return handleAutomation(async () => {
+      const ctx = await buildSessionContext(sessionName);
+      return scanDrafts(ctx);
+    });
+  });
+
+  ipcMain.handle(
+    'downloader:downloadAll',
+    async (_event, sessionName: string): Promise<RunResult> => {
+      return handleAutomation(async () => {
+        const ctx = await buildSessionContext(sessionName);
+        return runDownloads(ctx, Number.MAX_SAFE_INTEGER);
       });
     }
   );

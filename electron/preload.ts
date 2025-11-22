@@ -35,6 +35,11 @@ const electronAPI = {
     ipcRenderer.invoke('automation:run-downloads', sessionName, maxVideos),
   cancelAutomation: (sessionName: string): Promise<RunResult> =>
     ipcRenderer.invoke('automation:cancel', sessionName),
+  downloader: {
+    openDrafts: (sessionName: string): Promise<RunResult> => ipcRenderer.invoke('downloader:open-drafts', sessionName),
+    scanDrafts: (sessionName: string): Promise<RunResult> => ipcRenderer.invoke('downloader:scan', sessionName),
+    downloadAll: (sessionName: string): Promise<RunResult> => ipcRenderer.invoke('downloader:downloadAll', sessionName)
+  },
   generateWatermarkFrames: (videoPath: string): Promise<WatermarkFramesResult> =>
     ipcRenderer.invoke('watermark:frames', videoPath),
   telegramTest: (): Promise<{ ok: boolean; error?: string; details?: string }> =>

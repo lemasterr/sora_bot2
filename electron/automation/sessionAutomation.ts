@@ -13,6 +13,7 @@ const DOWNLOAD_BUTTON_SELECTOR = "button[data-testid='download']";
 
 const sessionLocks = new Set<string>();
 const sessionContexts = new Map<string, SessionRunContext>();
+const activeDraftBrowsers = new Map<string, Browser>();
 
 const registerContext = (ctx: SessionRunContext) => {
   sessionContexts.set(ctx.sessionName, ctx);
@@ -54,6 +55,22 @@ const closeBrowserSafe = async (browser: Browser | null) => {
   } catch (error) {
     console.error('Failed to close browser', error);
   }
+};
+
+const getOrLaunchBrowser = async (
+  ctx: SessionRunContext
+): Promise<{ browser: Browser; created: boolean }> => {
+  const existing = activeDraftBrowsers.get(ctx.sessionName);
+
+  if (existing && existing.isConnected()) {
+    return { browser: existing, created: false };
+  }
+
+  const launched = await launchBrowser(ctx);
+  const browser = launched.browser;
+  activeDraftBrowsers.set(ctx.sessionName, browser);
+  browser.on('disconnected', () => activeDraftBrowsers.delete(ctx.sessionName));
+  return { browser, created: true };
 };
 
 const readLines = async (filePath: string): Promise<string[]> => {
@@ -250,7 +267,7 @@ const downloadDraftCard = async (
   cardHandle: ElementHandle,
   title: string,
   ctx: SessionRunContext
-): Promise<void> => {
+): Promise<string> => {
   await fs.mkdir(ctx.downloadsDir, { recursive: true });
 
   await cardHandle.click();
@@ -285,6 +302,8 @@ const downloadDraftCard = async (
   } catch (error) {
     console.warn('Failed to close draft modal', error);
   }
+
+  return targetPath;
 };
 
 export const runDownloads = async (ctx: SessionRunContext, maxVideos: number): Promise<RunResult> => {
@@ -293,6 +312,7 @@ export const runDownloads = async (ctx: SessionRunContext, maxVideos: number): P
     const failedLogPath = path.join(ctx.sessionPath, 'failed.log');
     let downloadedCount = 0;
     let skippedCount = 0;
+    let lastDownloadedFile: string | undefined;
 
     try {
       const titlesPath = path.join(ctx.sessionPath, 'titles.txt');
@@ -317,7 +337,7 @@ export const runDownloads = async (ctx: SessionRunContext, maxVideos: number): P
         const title = titles[i]?.trim() || `video_${i + 1}`;
 
         try {
-          await downloadDraftCard(page, card, title, ctx);
+          lastDownloadedFile = await downloadDraftCard(page, card, title, ctx);
           downloadedCount += 1;
           await page.waitForTimeout(1000);
         } catch (error) {
@@ -330,13 +350,49 @@ export const runDownloads = async (ctx: SessionRunContext, maxVideos: number): P
         }
       }
 
-      return { ok: true, downloadedCount, skippedCount };
+      return { ok: true, downloadedCount, skippedCount, lastDownloadedFile };
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : 'Unknown error';
       await appendLog(failedLogPath, `${new Date().toISOString()} | DOWNLOAD FATAL | ${errorMessage}`);
-      return { ok: false, error: errorMessage, downloadedCount, skippedCount };
+      return { ok: false, error: errorMessage, downloadedCount, skippedCount, lastDownloadedFile };
     } finally {
       await closeBrowserSafe(browser);
     }
   });
+};
+
+export const openDrafts = async (ctx: SessionRunContext): Promise<RunResult> => {
+  try {
+    const { browser } = await getOrLaunchBrowser(ctx);
+    const page = await newPage(browser);
+    await page.goto(DRAFTS_URL, { waitUntil: 'networkidle2' });
+    return { ok: true, details: 'Drafts page opened in Chrome' };
+  } catch (error) {
+    const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+    return { ok: false, error: errorMessage };
+  }
+};
+
+export const scanDrafts = async (ctx: SessionRunContext): Promise<RunResult> => {
+  let browser: Browser | null = null;
+  let created = false;
+
+  try {
+    const result = await getOrLaunchBrowser(ctx);
+    browser = result.browser;
+    created = result.created;
+
+    const page = await newPage(browser);
+    await page.goto(DRAFTS_URL, { waitUntil: 'networkidle2' });
+    const cards = await page.$$(DRAFT_CARD_SELECTOR);
+
+    return { ok: true, draftsFound: cards.length, details: `${cards.length} drafts found` };
+  } catch (error) {
+    const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+    return { ok: false, error: errorMessage };
+  } finally {
+    if (created) {
+      await closeBrowserSafe(browser);
+    }
+  }
 };

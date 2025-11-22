@@ -19,6 +19,7 @@ export function Layout({ currentPage, onNavigate, pageTitle, pageDescription, ch
       { key: 'dashboard', label: 'Dashboard', icon: '📊' },
       { key: 'sessions', label: 'Sessions', icon: '🗂️' },
       { key: 'automator', label: 'Automator', icon: '🤖' },
+      { key: 'downloader', label: 'Downloader', icon: '⬇️' },
       { key: 'content', label: 'Content', icon: '✍️' },
       { key: 'watermark', label: 'Watermark', icon: '💧' },
       { key: 'telegram', label: 'Telegram', icon: '📨' },

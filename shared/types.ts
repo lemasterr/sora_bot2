@@ -79,6 +79,8 @@ export interface RunResult {
   failedCount?: number;
   downloadedCount?: number;
   skippedCount?: number;
+  draftsFound?: number;
+  lastDownloadedFile?: string;
 }
 
 export interface DownloadedVideo {

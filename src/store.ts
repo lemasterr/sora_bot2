@@ -5,6 +5,7 @@ export type AppPage =
   | 'dashboard'
   | 'sessions'
   | 'automator'
+  | 'downloader'
   | 'content'
   | 'logs'
   | 'watermark'
