@@ -5,7 +5,7 @@
   "main": "dist-electron/main.js",
   "scripts": {
     "dev": "concurrently -k \"vite\" \"npm:electron\"",
-    "electron": "wait-on http://localhost:5173 && cross-env NODE_ENV=development electron -r ts-node/register/transpile-only ./electron/main.ts",
+    "electron": "wait-on http://localhost:5173 && cross-env NODE_ENV=development TS_NODE_PROJECT=tsconfig.electron.json electron ./electron/dev-main.js",
     "build": "npm run build:renderer && npm run build:electron && electron-builder",
     "build:renderer": "vite build",
     "build:electron": "tsc -p tsconfig.electron.json",
