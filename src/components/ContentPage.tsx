@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import type { ManagedSession, SessionFiles } from '../shared/types';
+import type { ChromeProfile, SessionFiles } from '../shared/types';
 
 const panelClass =
   'rounded-2xl border border-zinc-800 bg-[#0f0f12] shadow-lg shadow-blue-500/5 transition-all';
@@ -20,37 +20,59 @@ const autoResize = (el: HTMLTextAreaElement) => {
 };
 
 export const ContentPage: React.FC = () => {
-  const [sessions, setSessions] = useState<ManagedSession[]>([]);
-  const [selectedId, setSelectedId] = useState<string>('');
+  const [profiles, setProfiles] = useState<ChromeProfile[]>([]);
+  const [selectedProfile, setSelectedProfile] = useState<string>('');
   const [values, setValues] = useState<Record<'prompts' | 'images' | 'titles', string>>({
     prompts: '',
     images: '',
     titles: ''
   });
   const [loading, setLoading] = useState(false);
+  const [loadingProfiles, setLoadingProfiles] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [status, setStatus] = useState<string | null>(null);
 
   useEffect(() => {
-    const loadSessions = async () => {
-      const list = await window.electronAPI.sessions.list();
-      setSessions(list);
-      if (list.length > 0) {
-        setSelectedId(list[0].id);
+    const loadProfiles = async () => {
+      setLoadingProfiles(true);
+      setError(null);
+      try {
+        const [config, result] = await Promise.all([
+          window.electronAPI.config.get(),
+          window.electronAPI.chrome.listProfiles(),
+        ]);
+
+        if (!result?.ok) {
+          throw new Error(result?.error || 'Failed to list profiles');
+        }
+
+        setProfiles(result.profiles as ChromeProfile[]);
+
+        const activeName = (config as any)?.chromeActiveProfileName as string | undefined;
+        const fallback = (result.profiles as ChromeProfile[])[0]?.name ?? '';
+        setSelectedProfile(activeName || fallback || '');
+      } catch (err) {
+        setError((err as Error).message);
+      } finally {
+        setLoadingProfiles(false);
       }
     };
-    loadSessions();
+    loadProfiles();
   }, []);
 
   useEffect(() => {
     const fetchFiles = async () => {
-      if (!selectedId) return;
+      if (!selectedProfile) return;
       setLoading(true);
       setError(null);
       setStatus(null);
       try {
-        const files = await window.electronAPI.files.read(selectedId);
+        const response = await window.electronAPI.files.read(selectedProfile);
+        if (!response?.ok) {
+          throw new Error(response?.error || 'Failed to load files');
+        }
+        const files = response.files as SessionFiles;
         setValues({
           prompts: files.prompts.join('\n'),
           images: files.imagePrompts.join('\n'),
@@ -63,7 +85,7 @@ export const ContentPage: React.FC = () => {
       }
     };
     fetchFiles();
-  }, [selectedId]);
+  }, [selectedProfile]);
 
   const counts = useMemo(
     () => ({
@@ -82,13 +104,13 @@ export const ContentPage: React.FC = () => {
   };
 
   const handleSave = async () => {
-    if (!selectedId) return;
+    if (!selectedProfile) return;
     setSaving(true);
     setStatus(null);
     setError(null);
     try {
       const payload = toArrays(values);
-      const result = await window.electronAPI.files.save(selectedId, payload);
+      const result = await window.electronAPI.files.save(selectedProfile, payload);
       if (!result.ok) {
         setError(result.error || 'Failed to save files');
       } else {
@@ -101,7 +123,7 @@ export const ContentPage: React.FC = () => {
     }
   };
 
-  const sessionName = sessions.find((s) => s.id === selectedId)?.name ?? 'Unknown';
+  const profileLabel = profiles.find((p) => p.name === selectedProfile)?.name ?? 'Unknown';
 
   const renderColumn = (
     key: 'prompts' | 'images' | 'titles',
@@ -119,7 +141,7 @@ export const ContentPage: React.FC = () => {
           <span className={`text-xs font-semibold ${accent ?? 'text-blue-400'}`}>{counts[key]} lines</span>
           <button
             onClick={handleSave}
-            disabled={saving || !selectedId}
+            disabled={saving || !selectedProfile}
             className="rounded-lg border border-blue-500/60 bg-blue-500/10 px-3 py-1 text-xs font-semibold text-blue-100 hover:bg-blue-500/20 disabled:opacity-60"
           >
             {saving ? 'Saving…' : 'Save'}
@@ -141,22 +163,23 @@ export const ContentPage: React.FC = () => {
       <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
         <div>
           <h3 className="text-xl font-semibold text-white">Content Editor</h3>
-          <p className="text-sm text-zinc-400">Edit prompt, image, and title files for each managed session.</p>
+          <p className="text-sm text-zinc-400">Edit prompt, image, and title files for each Chrome profile.</p>
         </div>
         <select
-          value={selectedId}
-          onChange={(e) => setSelectedId(e.target.value)}
+          value={selectedProfile}
+          onChange={(e) => setSelectedProfile(e.target.value)}
           className="w-full max-w-xs rounded-xl border border-zinc-700 bg-zinc-900 px-3 py-2 text-sm text-zinc-100 focus:border-blue-500 focus:outline-none"
         >
-          {sessions.length === 0 && <option value="">No sessions configured</option>}
-          {sessions.map((session) => (
-            <option key={session.id} value={session.id}>
-              {session.name || session.id}
+          {profiles.length === 0 && <option value="">No profiles found</option>}
+          {profiles.map((profile) => (
+            <option key={profile.name} value={profile.name}>
+              {profile.name}
             </option>
           ))}
         </select>
       </div>
 
+      {loadingProfiles && <div className="text-sm text-zinc-500">Loading profiles…</div>}
       {loading && <div className="text-sm text-zinc-500">Loading files…</div>}
       {error && (
         <div className="rounded-lg border border-red-500/40 bg-red-500/10 px-3 py-2 text-sm text-red-100">{error}</div>
@@ -165,11 +188,11 @@ export const ContentPage: React.FC = () => {
         <div className="rounded-lg border border-emerald-500/40 bg-emerald-500/10 px-3 py-2 text-sm text-emerald-100">{status}</div>
       )}
 
-      {selectedId ? (
+      {selectedProfile ? (
         <>
           {mismatch && (
             <div className="rounded-lg border border-amber-500/40 bg-amber-500/10 px-4 py-3 text-sm text-amber-100">
-              Line counts mismatch for {sessionName}. Titles should match prompts; image prompts should not exceed prompts.
+              Line counts mismatch for {profileLabel}. Titles should match prompts; image prompts should not exceed prompts.
             </div>
           )}
 
@@ -181,7 +204,7 @@ export const ContentPage: React.FC = () => {
         </>
       ) : (
         <div className="rounded-lg border border-dashed border-zinc-700 bg-zinc-900/40 p-6 text-center text-zinc-400">
-          Configure a session and select it to edit its content files.
+          Scan or configure a Chrome profile and select it to edit its content files.
         </div>
       )}
     </div>

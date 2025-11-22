@@ -31,6 +31,10 @@ contextBridge.exposeInMainWorld('electronAPI', {
       safeInvoke('sessions:runDownloads', id, maxVideos ?? 0),
     cancelDownloads: (id: string): Promise<unknown> => safeInvoke('sessions:cancelDownloads', id),
   },
+  files: {
+    read: (profileName?: string | null): Promise<unknown> => safeInvoke('files:read', profileName ?? null),
+    save: (profileName: string | null, files: unknown): Promise<unknown> => safeInvoke('files:save', profileName, files),
+  },
   pipeline: {
     run: (steps: unknown): Promise<unknown> => safeInvoke('pipeline:run', steps),
     cancel: (): Promise<unknown> => safeInvoke('pipeline:cancel'),
