@@ -1,4 +1,8 @@
 import type { Session } from '../sessions/types';
+import { getSession, getSessionPaths } from '../sessions/repo';
+import { runPrompts } from './promptsRunner';
+import { runDownloads } from './downloader';
+import { cleanWatermarkBatch } from '../video/ffmpegWatermark';
 
 export type StepType =
   | 'session_prompts'
@@ -26,14 +30,95 @@ export type PipelineStatus = {
   message: string;
 };
 
+let cancelled = false;
+
+function report(onProgress: (status: PipelineStatus) => void, status: PipelineStatus) {
+  try {
+    onProgress(status);
+  } catch (error) {
+    // swallow renderer progress errors
+    // eslint-disable-next-line no-console
+    console.warn('Pipeline progress error', error);
+  }
+}
+
+async function resolveSessions(ids: string[] = []): Promise<Session[]> {
+  const sessions: Session[] = [];
+  for (const id of ids) {
+    const session = await getSession(id);
+    if (session) {
+      sessions.push(session);
+    }
+  }
+  return sessions;
+}
+
 export async function runPipeline(
-  _steps: PipelineStep[],
-  _onProgress: (status: PipelineStatus) => void
+  steps: PipelineStep[],
+  onProgress: (status: PipelineStatus) => void
 ): Promise<void> {
-  // TODO: implement sequential pipeline execution
-  throw new Error('Not implemented');
+  cancelled = false;
+  report(onProgress, { running: true, currentStepId: null, message: 'Pipeline starting' });
+
+  try {
+    for (const step of steps) {
+      if (cancelled) break;
+
+      report(onProgress, {
+        running: true,
+        currentStepId: step.id,
+        message: `Running ${step.type}`,
+      });
+
+      switch (step.type) {
+        case 'session_prompts': {
+          const sessions = await resolveSessions(step.sessionIds);
+          for (const session of sessions) {
+            if (cancelled) break;
+            await runPrompts(session);
+          }
+          break;
+        }
+        case 'session_download': {
+          const sessions = await resolveSessions(step.sessionIds);
+          for (const session of sessions) {
+            if (cancelled) break;
+            await runDownloads(session, step.limit ?? 0);
+          }
+          break;
+        }
+        case 'session_watermark': {
+          const sessions = await resolveSessions(step.sessionIds);
+          for (const session of sessions) {
+            if (cancelled) break;
+            const paths = await getSessionPaths(session);
+            await cleanWatermarkBatch(paths.downloadDir, paths.cleanDir);
+          }
+          break;
+        }
+        case 'session_images':
+        case 'session_mix':
+        case 'session_chrome':
+        case 'global_blur':
+        case 'global_merge':
+        case 'global_watermark':
+        case 'global_probe': {
+          // Stubs for future implementation
+          break;
+        }
+        default:
+          break;
+      }
+    }
+  } finally {
+    report(onProgress, {
+      running: false,
+      currentStepId: null,
+      message: cancelled ? 'Pipeline cancelled' : 'Pipeline complete',
+    });
+  }
 }
 
 export function cancelPipeline(): void {
-  // TODO: implement pipeline cancellation
+  cancelled = true;
 }
