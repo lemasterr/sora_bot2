@@ -35,14 +35,36 @@ contextBridge.exposeInMainWorld('electronAPI', {
     read: (profileName?: string | null): Promise<unknown> => safeInvoke('files:read', profileName ?? null),
     save: (profileName: string | null, files: unknown): Promise<unknown> => safeInvoke('files:save', profileName, files),
   },
+  sessionFiles: {
+    read: (profileName?: string | null): Promise<unknown> => safeInvoke('files:read', profileName ?? null),
+    save: (profileName: string | null, files: unknown): Promise<unknown> => safeInvoke('files:save', profileName, files),
+  },
+  autogen: {
+    run: (sessionId: string): Promise<unknown> => safeInvoke('autogen:run', sessionId),
+    stop: (sessionId: string): Promise<unknown> => safeInvoke('autogen:stop', sessionId),
+  },
+  downloader: {
+    run: (sessionId: string, options?: unknown): Promise<unknown> => safeInvoke('downloader:run', sessionId, options),
+    stop: (sessionId: string): Promise<unknown> => safeInvoke('downloader:stop', sessionId),
+  },
   pipeline: {
     run: (steps: unknown): Promise<unknown> => safeInvoke('pipeline:run', steps),
+    dryRun: (steps: unknown): Promise<unknown> => safeInvoke('pipeline:dryRun', steps),
+    listPresets: (): Promise<unknown> => safeInvoke('pipeline:listPresets'),
+    savePreset: (preset: unknown): Promise<unknown> => safeInvoke('pipeline:savePreset', preset),
+    deletePreset: (name: string): Promise<unknown> => safeInvoke('pipeline:deletePreset', name),
+    listSchedules: (): Promise<unknown> => safeInvoke('pipeline:listSchedules'),
+    saveSchedule: (schedule: unknown): Promise<unknown> => safeInvoke('pipeline:saveSchedule', schedule),
+    deleteSchedule: (id: string): Promise<unknown> => safeInvoke('pipeline:deleteSchedule', id),
     cancel: (): Promise<unknown> => safeInvoke('pipeline:cancel'),
     onProgress: (cb: (status: unknown) => void) => {
       ipcRenderer.removeAllListeners('pipeline:progress');
       ipcRenderer.on('pipeline:progress', (_event, status) => cb(status));
       return () => ipcRenderer.removeAllListeners('pipeline:progress');
     },
+  },
+  qa: {
+    batchRun: (videoDir?: string): Promise<unknown> => safeInvoke('qa:batchRun', videoDir),
   },
   video: {
     extractPreviewFrames: (videoPath: string, count: number): Promise<unknown> =>

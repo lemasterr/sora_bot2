@@ -115,18 +115,39 @@ export const SessionsPage: React.FC = () => {
 
   const handleAction = async (action: 'prompts' | 'downloads' | 'stop' | 'open') => {
     if (!form.id || !window.electronAPI.sessions) return;
-    let result: RunResult;
     if (action === 'open') {
       setOpenWindowId(form.id);
       setActionMessage('Session window opened');
       return;
-    } else if (action === 'prompts') {
-      result = await window.electronAPI.sessions.runPrompts(form.id);
-    } else if (action === 'downloads') {
-      result = await window.electronAPI.sessions.runDownloads(form.id);
-    } else {
-      result = await window.electronAPI.sessions.stop(form.id);
     }
+
+    const autogen = window.electronAPI.autogen;
+    const downloader = window.electronAPI.downloader;
+    let result: RunResult | undefined;
+
+    if (action === 'prompts') {
+      result = (await autogen?.run?.(form.id)) as RunResult;
+      if (!result && window.electronAPI.sessions.runPrompts) {
+        result = await window.electronAPI.sessions.runPrompts(form.id);
+      }
+    } else if (action === 'downloads') {
+      result = (await downloader?.run?.(form.id, { limit: form.maxVideos ?? 0 })) as RunResult;
+      if (!result && window.electronAPI.sessions.runDownloads) {
+        result = await window.electronAPI.sessions.runDownloads(form.id, form.maxVideos);
+      }
+    } else {
+      result = (await autogen?.stop?.(form.id)) as RunResult;
+      await downloader?.stop?.(form.id);
+      if (!result && window.electronAPI.sessions.cancelPrompts) {
+        result = await window.electronAPI.sessions.cancelPrompts(form.id);
+      }
+    }
+
+    if (!result) {
+      setActionMessage('No response received');
+      return;
+    }
+
     const message = result.ok ? result.details ?? 'OK' : result.error ?? 'Error';
     setActionMessage(message);
     loadSessions();

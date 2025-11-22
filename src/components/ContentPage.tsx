@@ -29,28 +29,30 @@ export const ContentPage: React.FC = () => {
   });
   const [loading, setLoading] = useState(false);
   const [loadingProfiles, setLoadingProfiles] = useState(false);
+  const [scanning, setScanning] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [status, setStatus] = useState<string | null>(null);
 
   useEffect(() => {
-    const loadProfiles = async () => {
+    const loadProfiles = async (forceScan?: boolean) => {
       setLoadingProfiles(true);
       setError(null);
       try {
-        const [config, result] = await Promise.all([
-          window.electronAPI.config.get(),
-          window.electronAPI.chrome.listProfiles(),
-        ]);
+        const config = await window.electronAPI.config.get();
+        const profileResult = forceScan
+          ? await window.electronAPI.chrome.scanProfiles()
+          : await window.electronAPI.chrome.listProfiles();
 
-        if (!result?.ok) {
-          throw new Error(result?.error || 'Failed to list profiles');
+        if (!profileResult?.ok) {
+          throw new Error(profileResult?.error || 'Failed to load profiles');
         }
 
-        setProfiles(result.profiles as ChromeProfile[]);
+        const nextProfiles = (profileResult.profiles as ChromeProfile[]) ?? [];
+        setProfiles(nextProfiles);
 
-        const activeName = (config as any)?.chromeActiveProfileName as string | undefined;
-        const fallback = (result.profiles as ChromeProfile[])[0]?.name ?? '';
+        const activeName = (config as any)?.activeChromeProfile ?? (config as any)?.chromeActiveProfileName;
+        const fallback = nextProfiles[0]?.name ?? '';
         setSelectedProfile(activeName || fallback || '');
       } catch (err) {
         setError((err as Error).message);
@@ -59,6 +61,10 @@ export const ContentPage: React.FC = () => {
       }
     };
     loadProfiles();
+
+    return () => {
+      setProfiles([]);
+    };
   }, []);
 
   useEffect(() => {
@@ -68,7 +74,7 @@ export const ContentPage: React.FC = () => {
       setError(null);
       setStatus(null);
       try {
-        const response = await window.electronAPI.files.read(selectedProfile);
+        const response = await (window.electronAPI.sessionFiles?.read ?? window.electronAPI.files.read)(selectedProfile);
         if (!response?.ok) {
           throw new Error(response?.error || 'Failed to load files');
         }
@@ -110,7 +116,8 @@ export const ContentPage: React.FC = () => {
     setError(null);
     try {
       const payload = toArrays(values);
-      const result = await window.electronAPI.files.save(selectedProfile, payload);
+      const saveFn = window.electronAPI.sessionFiles?.save ?? window.electronAPI.files.save;
+      const result = await saveFn(selectedProfile, payload);
       if (!result.ok) {
         setError(result.error || 'Failed to save files');
       } else {
@@ -160,24 +167,49 @@ export const ContentPage: React.FC = () => {
 
   return (
     <div className="space-y-4">
-      <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
-        <div>
-          <h3 className="text-xl font-semibold text-white">Content Editor</h3>
-          <p className="text-sm text-zinc-400">Edit prompt, image, and title files for each Chrome profile.</p>
+        <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+          <div>
+            <h3 className="text-xl font-semibold text-white">Content Editor</h3>
+            <p className="text-sm text-zinc-400">Edit prompt, image, and title files for each Chrome profile.</p>
+          </div>
+          <div className="flex flex-col gap-2 md:flex-row md:items-center md:gap-3">
+            <select
+              value={selectedProfile}
+              onChange={(e) => setSelectedProfile(e.target.value)}
+              className="w-full max-w-xs rounded-xl border border-zinc-700 bg-zinc-900 px-3 py-2 text-sm text-zinc-100 focus:border-blue-500 focus:outline-none"
+            >
+              {profiles.length === 0 && <option value="">No profiles found</option>}
+              {profiles.map((profile) => (
+                <option key={profile.name} value={profile.name}>
+                  {profile.name}
+                </option>
+              ))}
+            </select>
+            <button
+              onClick={async () => {
+                setScanning(true);
+                setError(null);
+                try {
+                  const result = await window.electronAPI.chrome.scanProfiles();
+                  if (!result?.ok) throw new Error(result?.error || 'Scan failed');
+                  const next = (result.profiles as ChromeProfile[]) ?? [];
+                  setProfiles(next);
+                  if (!next.find((p) => p.name === selectedProfile)) {
+                    setSelectedProfile(next[0]?.name ?? '');
+                  }
+                } catch (err) {
+                  setError((err as Error).message);
+                } finally {
+                  setScanning(false);
+                }
+              }}
+              disabled={scanning}
+              className="inline-flex items-center justify-center rounded-lg border border-zinc-700 bg-zinc-900 px-3 py-2 text-sm text-zinc-100 hover:border-blue-500 disabled:opacity-50"
+            >
+              {scanning ? 'Scanning…' : 'Rescan Profiles'}
+            </button>
+          </div>
         </div>
-        <select
-          value={selectedProfile}
-          onChange={(e) => setSelectedProfile(e.target.value)}
-          className="w-full max-w-xs rounded-xl border border-zinc-700 bg-zinc-900 px-3 py-2 text-sm text-zinc-100 focus:border-blue-500 focus:outline-none"
-        >
-          {profiles.length === 0 && <option value="">No profiles found</option>}
-          {profiles.map((profile) => (
-            <option key={profile.name} value={profile.name}>
-              {profile.name}
-            </option>
-          ))}
-        </select>
-      </div>
 
       {loadingProfiles && <div className="text-sm text-zinc-500">Loading profiles…</div>}
       {loading && <div className="text-sm text-zinc-500">Loading files…</div>}
