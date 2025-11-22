@@ -4,6 +4,8 @@ import type {
   DownloadedVideo,
   ChromeProfile,
   ManagedSession,
+  SessionCommandAction,
+  SessionLogEntry,
   RunResult,
   SessionFiles,
   SessionInfo,
@@ -52,7 +54,32 @@ const electronAPI = {
     remove: (id: string): Promise<ManagedSession[]> => ipcRenderer.invoke('sessions:registry:remove', id),
     runPrompts: (id: string): Promise<RunResult> => ipcRenderer.invoke('sessions:runPrompts', id),
     runDownloads: (id: string): Promise<RunResult> => ipcRenderer.invoke('sessions:runDownloads', id),
-    stop: (id: string): Promise<RunResult> => ipcRenderer.invoke('sessions:stop', id)
+    stop: (id: string): Promise<RunResult> => ipcRenderer.invoke('sessions:stop', id),
+    command: (id: string, action: SessionCommandAction): Promise<RunResult> =>
+      ipcRenderer.invoke('sessions:command', id, action),
+    subscribeLogs: (id: string, cb: (entry: SessionLogEntry) => void): (() => void) => {
+      const onLog = (_event: IpcRendererEvent, sessionId: string, entry: SessionLogEntry) => {
+        if (sessionId === id) {
+          cb(entry);
+        }
+      };
+
+      const onInit = (_event: IpcRendererEvent, sessionId: string, entries: SessionLogEntry[]) => {
+        if (sessionId === id) {
+          entries.forEach(cb);
+        }
+      };
+
+      ipcRenderer.on('sessions:log', onLog);
+      ipcRenderer.on('sessions:logs:init', onInit);
+      ipcRenderer.invoke('sessions:logs:subscribe', id);
+
+      return () => {
+        ipcRenderer.invoke('sessions:logs:unsubscribe', id);
+        ipcRenderer.removeListener('sessions:log', onLog);
+        ipcRenderer.removeListener('sessions:logs:init', onInit);
+      };
+    }
   }
 };
 

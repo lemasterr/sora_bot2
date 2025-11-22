@@ -22,8 +22,10 @@ import type {
   SessionInfo,
   WatermarkFramesResult,
   ChromeProfile,
-  ManagedSession
+  ManagedSession,
+  SessionCommandAction
 } from '../shared/types';
+import { sessionLogBroker } from './sessionLogs';
 
 const isDev = process.env.NODE_ENV === 'development';
 
@@ -31,6 +33,15 @@ let mainWindow: BrowserWindow | null = null;
 let sessionManager: SessionManager | null = null;
 let currentConfig: Config | null = null;
 const sessionRunStates = new Map<string, ManagedSession['status']>();
+
+const logSession = (sessionId: string, scope: string, message: string, level: 'info' | 'error' = 'info') => {
+  sessionLogBroker.log(sessionId, {
+    timestamp: Date.now(),
+    scope,
+    level,
+    message
+  });
+};
 
 const createWindow = () => {
   const preloadPath = isDev ? path.join(__dirname, 'preload.ts') : path.join(__dirname, 'preload.js');
@@ -164,29 +175,69 @@ const registerIpc = () => {
     return saved.map((entry) => ({ ...entry, status: sessionRunStates.get(entry.id) || entry.status || 'idle' }));
   });
 
-  ipcMain.handle('sessions:runPrompts', async (_event, id: string): Promise<RunResult> => {
+  ipcMain.handle('sessions:logs:subscribe', (event, id: string) => {
+    sessionLogBroker.subscribe(id, event.sender);
+    return { ok: true };
+  });
+
+  ipcMain.handle('sessions:logs:unsubscribe', (event, id: string) => {
+    sessionLogBroker.unsubscribe(id, event.sender.id);
+    return { ok: true };
+  });
+
+  const setSessionStatus = (id: string, status: ManagedSession['status']) => {
+    sessionRunStates.set(id, status);
+  };
+
+  const handleSessionCommand = async (id: string, action: SessionCommandAction): Promise<RunResult> => {
     try {
-      sessionRunStates.set(id, 'running');
-      return { ok: true, details: 'Prompts started' };
+      setSessionStatus(id, action === 'stop' ? 'idle' : 'running');
+      const label =
+        action === 'startChrome'
+          ? 'Chrome'
+          : action === 'runPrompts'
+            ? 'Prompts'
+            : action === 'runDownloads'
+              ? 'Download'
+              : action === 'cleanWatermark'
+                ? 'Watermark'
+                : 'Worker';
+
+      logSession(id, label, `${action} requested`);
+
+      // stub operational logs to visualize streaming
+      setTimeout(() => logSession(id, label, 'Working...'), 500);
+      setTimeout(() => logSession(id, label, 'Still running...'), 1200);
+      setTimeout(() => logSession(id, label, 'Done'), 2000);
+
+      if (action === 'stop') {
+        logSession(id, 'Worker', 'Stopped by user');
+        return { ok: true, details: 'Stopped' };
+      }
+
+      return { ok: true, details: `${action} started` };
     } catch (error) {
-      sessionRunStates.set(id, 'error');
-      return { ok: false, error: (error as Error).message };
+      setSessionStatus(id, 'error');
+      const message = error instanceof Error ? error.message : 'Unknown error';
+      logSession(id, 'Worker', message, 'error');
+      return { ok: false, error: message };
     }
+  };
+
+  ipcMain.handle('sessions:runPrompts', async (_event, id: string): Promise<RunResult> => {
+    return handleSessionCommand(id, 'runPrompts');
   });
 
   ipcMain.handle('sessions:runDownloads', async (_event, id: string): Promise<RunResult> => {
-    try {
-      sessionRunStates.set(id, 'running');
-      return { ok: true, details: 'Downloads started' };
-    } catch (error) {
-      sessionRunStates.set(id, 'error');
-      return { ok: false, error: (error as Error).message };
-    }
+    return handleSessionCommand(id, 'runDownloads');
   });
 
   ipcMain.handle('sessions:stop', async (_event, id: string): Promise<RunResult> => {
-    sessionRunStates.set(id, 'idle');
-    return { ok: true, details: 'Stopped' };
+    return handleSessionCommand(id, 'stop');
+  });
+
+  ipcMain.handle('sessions:command', async (_event, id: string, action: SessionCommandAction) => {
+    return handleSessionCommand(id, action);
   });
 
   ipcMain.handle('window:minimize', () => {

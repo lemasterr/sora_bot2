@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import type { ManagedSession, ChromeProfile, RunResult } from '../shared/types';
+import { SessionWindow } from './SessionWindow';
 
 const statusColors: Record<NonNullable<ManagedSession['status']>, string> = {
   idle: 'bg-zinc-700',
@@ -37,8 +38,10 @@ export const SessionsPage: React.FC = () => {
   const [profiles, setProfiles] = useState<ChromeProfile[]>([]);
   const [saving, setSaving] = useState(false);
   const [actionMessage, setActionMessage] = useState<string>('');
+  const [openWindowId, setOpenWindowId] = useState<string | null>(null);
 
   const selectedSession = useMemo(() => sessions.find((s) => s.id === selectedId), [sessions, selectedId]);
+  const openSession = useMemo(() => sessions.find((s) => s.id === openWindowId) || null, [sessions, openWindowId]);
 
   const loadSessions = async () => {
     if (!window.electronAPI?.sessions) return;
@@ -103,7 +106,8 @@ export const SessionsPage: React.FC = () => {
     if (!form.id || !window.electronAPI.sessions) return;
     let result: RunResult;
     if (action === 'open') {
-      setActionMessage('Session window requested');
+      setOpenWindowId(form.id);
+      setActionMessage('Session window opened');
       return;
     } else if (action === 'prompts') {
       result = await window.electronAPI.sessions.runPrompts(form.id);
@@ -436,6 +440,7 @@ export const SessionsPage: React.FC = () => {
           </button>
         </div>
       </div>
+      {openSession && <SessionWindow session={openSession} onClose={() => setOpenWindowId(null)} />}
     </div>
   );
 };

@@ -43,6 +43,20 @@ export interface ManagedSession {
   status?: 'idle' | 'running' | 'warning' | 'error';
 }
 
+export type SessionCommandAction =
+  | 'startChrome'
+  | 'runPrompts'
+  | 'runDownloads'
+  | 'cleanWatermark'
+  | 'stop';
+
+export interface SessionLogEntry {
+  timestamp: number;
+  scope: 'Chrome' | 'Prompts' | 'Download' | 'Worker' | 'Watermark' | string;
+  level: 'info' | 'error';
+  message: string;
+}
+
 export interface SessionInfo {
   name: string;
   path: string;
