@@ -1,0 +1,18 @@
+@import './Theme.css';
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+body {
+  @apply bg-[#09090b] text-zinc-100 antialiased font-inter;
+}
+
+* {
+  scrollbar-color: #27272a #09090b;
+  scrollbar-width: thin;
+}
+
+a {
+  @apply text-blue-400 hover:text-blue-300;
+}

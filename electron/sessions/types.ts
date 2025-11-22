@@ -1,0 +1,20 @@
+export type Session = {
+  id: string;
+  name: string;
+  chromeProfileName: string | null;
+  promptProfile: string | null;
+  cdpPort: number | null;
+  promptsFile: string;
+  imagePromptsFile: string;
+  titlesFile: string;
+  submittedLog: string;
+  failedLog: string;
+  downloadDir: string;
+  cleanDir: string;
+  cursorFile: string;
+  maxVideos: number;
+  openDrafts: boolean;
+  autoLaunchChrome: boolean;
+  autoLaunchAutogen: boolean;
+  notes: string;
+};
