@@ -1,38 +1,22 @@
-import { EventEmitter } from "events";
+import { EventEmitter } from 'events';
 
-export type LogLevel = "info" | "warn" | "error";
-
-export interface LogEntry {
+export type LogEntry = {
   ts: string;
-  level: LogLevel;
+  level: 'info' | 'warn' | 'error';
   source: string;
   msg: string;
-}
+};
 
 export const loggerEvents = new EventEmitter();
 
-const emit = (level: LogLevel, source: string, msg: string): void => {
-  const entry: LogEntry = {
-    ts: new Date().toISOString(),
-    level,
-    source,
-    msg,
-  };
+export function logInfo(_source: string, _msg: string): void {
+  // TODO: emit info log
+}
 
-  const formatted = `[${entry.ts}] [${entry.source}] ${entry.msg}`;
-  if (level === "warn") {
-    console.warn(formatted);
-  } else if (level === "error") {
-    console.error(formatted);
-  } else {
-    console.info(formatted);
-  }
+export function logWarn(_source: string, _msg: string): void {
+  // TODO: emit warn log
+}
 
-  loggerEvents.emit("log", entry);
-};
-
-export const logInfo = (source: string, msg: string): void => emit("info", source, msg);
-
-export const logWarn = (source: string, msg: string): void => emit("warn", source, msg);
-
-export const logError = (source: string, msg: string): void => emit("error", source, msg);
+export function logError(_source: string, _msg: string): void {
+  // TODO: emit error log
+}
