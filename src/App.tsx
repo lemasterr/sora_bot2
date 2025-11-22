@@ -1,4 +1,4 @@
-import { useMemo } from 'react';
+import { useEffect, useMemo } from 'react';
 import { useAppStore, AppPage } from './store';
 
 const navItems: { key: AppPage; label: string; icon: string }[] = [
@@ -73,7 +73,8 @@ function Sidebar({ currentPage, onNavigate }: { currentPage: AppPage; onNavigate
             <button
               key={item.key}
               onClick={() => onNavigate(item.key)}
-              className={`flex w-full items-center gap-3 rounded-lg px-3 py-2 text-left text-sm transition hover:bg-slate-800/70 ${
+              className={`flex w-full items-center gap-3 rounded-lg px-3 py-2 text-left text-sm transition hover:bg-slate-800/70
+ ${
                 active ? 'bg-slate-800 text-white ring-1 ring-emerald-600/60' : 'text-slate-300'
               }`}
             >
@@ -104,8 +105,12 @@ function Placeholder({ page }: { page: AppPage }) {
 }
 
 function App() {
-  const { currentPage, setCurrentPage } = useAppStore();
+  const { currentPage, setCurrentPage, loadInitialData } = useAppStore();
   const { title, description } = pageCopy[currentPage];
+
+  useEffect(() => {
+    loadInitialData();
+  }, [loadInitialData]);
 
   return (
     <div className="flex h-screen bg-slate-950 text-slate-100">
