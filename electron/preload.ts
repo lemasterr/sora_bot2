@@ -6,6 +6,7 @@ import type {
   ManagedSession,
   SessionCommandAction,
   SessionLogEntry,
+  AppLogEntry,
   RunResult,
   SessionFiles,
   SessionInfo,
@@ -115,6 +116,23 @@ const electronAPI = {
         ipcRenderer.removeListener('sessions:logs:init', onInit);
       };
     }
+  },
+  logs: {
+    subscribe: (cb: (entry: AppLogEntry) => void): (() => void) => {
+      const onLog = (_event: IpcRendererEvent, entry: AppLogEntry) => cb(entry);
+      const onInit = (_event: IpcRendererEvent, entries: AppLogEntry[]) => entries.forEach(cb);
+
+      ipcRenderer.on('logs:entry', onLog);
+      ipcRenderer.on('logs:init', onInit);
+      ipcRenderer.invoke('logs:subscribe');
+
+      return () => {
+        ipcRenderer.invoke('logs:unsubscribe');
+        ipcRenderer.removeListener('logs:entry', onLog);
+        ipcRenderer.removeListener('logs:init', onInit);
+      };
+    },
+    export: (): Promise<{ ok: boolean; path?: string; error?: string }> => ipcRenderer.invoke('logs:export')
   }
 };
 

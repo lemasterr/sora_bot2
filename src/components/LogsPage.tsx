@@ -1,11 +1,112 @@
+import { useEffect, useMemo, useRef, useState } from 'react';
+import type { AppLogEntry, LogSource } from '../shared/types';
+
+const SOURCES: LogSource[] = ['Chrome', 'Autogen', 'Downloader', 'Pipeline'];
+
+const sourceColor: Record<string, string> = {
+  Chrome: 'text-blue-400',
+  Autogen: 'text-emerald-300',
+  Downloader: 'text-sky-300',
+  Pipeline: 'text-indigo-300'
+};
+
 export function LogsPage() {
+  const [logs, setLogs] = useState<AppLogEntry[]>([]);
+  const [filters, setFilters] = useState<Set<LogSource>>(new Set(SOURCES));
+  const [exportMessage, setExportMessage] = useState<string>('');
+  const logRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!window.electronAPI.logs) return;
+    const unsubscribe = window.electronAPI.logs.subscribe((entry) => {
+      setLogs((prev) => [...prev.slice(-900), entry]);
+    });
+    return () => unsubscribe?.();
+  }, []);
+
+  useEffect(() => {
+    if (logRef.current) {
+      logRef.current.scrollTop = logRef.current.scrollHeight;
+    }
+  }, [logs]);
+
+  const toggleSource = (source: LogSource) => {
+    setFilters((prev) => {
+      const next = new Set(prev);
+      if (next.has(source)) {
+        next.delete(source);
+      } else {
+        next.add(source);
+      }
+      return next;
+    });
+  };
+
+  const filtered = useMemo(() => logs.filter((log) => filters.has(log.source)), [logs, filters]);
+
+  const formatTime = (timestamp: number) => {
+    const d = new Date(timestamp);
+    return d.toLocaleTimeString('en-US', { hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit' });
+  };
+
+  const exportLogs = async () => {
+    setExportMessage('');
+    const result = await window.electronAPI.logs.export();
+    if (result.ok) {
+      setExportMessage(`Exported to ${result.path}`);
+    } else if (result.error !== 'cancelled') {
+      setExportMessage(result.error || 'Export failed');
+    }
+  };
+
   return (
-    <div className="rounded-xl border border-[#27272a] bg-[#0f0f12]/80 p-6 shadow-lg shadow-blue-500/5">
-      <h2 className="text-xl font-semibold text-white">Logs</h2>
-      <p className="mt-2 text-sm text-zinc-400">
-        Log streaming and viewer will appear here. Use the sidebar to navigate to automation features while this page is under
-        construction.
-      </p>
+    <div className="flex h-full flex-col gap-4">
+      <div className="flex items-center justify-between">
+        <div>
+          <h2 className="text-xl font-semibold text-white">Activity Logs</h2>
+          <p className="text-sm text-zinc-400">Global stream across Chrome, automation, downloads, and pipelines.</p>
+        </div>
+        <div className="flex items-center gap-3">
+          <div className="flex items-center gap-2 text-xs text-zinc-300">
+            {SOURCES.map((source) => (
+              <button
+                key={source}
+                onClick={() => toggleSource(source)}
+                className={`rounded-full border px-3 py-1 font-semibold transition ${filters.has(source) ? 'border-blue-500 bg-blue-500/10 text-blue-200' : 'border-zinc-700 text-zinc-400 hover:border-blue-500/50'}`}
+              >
+                {source}
+              </button>
+            ))}
+          </div>
+          <button
+            onClick={exportLogs}
+            className="rounded-lg border border-zinc-700 px-3 py-2 text-sm font-semibold text-zinc-100 hover:border-blue-500 hover:text-blue-100"
+          >
+            Export to file
+          </button>
+        </div>
+      </div>
+
+      {exportMessage && <div className="rounded-lg border border-emerald-700/70 bg-emerald-900/30 px-4 py-2 text-sm text-emerald-200">{exportMessage}</div>}
+
+      <div className="flex-1 overflow-hidden rounded-xl border border-zinc-800 bg-black/90">
+        <div className="h-full overflow-y-auto p-4 font-mono text-sm text-gray-200" ref={logRef}>
+          {filtered.length === 0 && <div className="text-zinc-500">Waiting for activity...</div>}
+          {filtered.map((entry, idx) => {
+            const tagColor = sourceColor[entry.source] || 'text-sky-300';
+            const levelColor = entry.level === 'error' ? 'text-rose-400' : 'text-emerald-300';
+            return (
+              <div key={`${entry.timestamp}-${idx}`} className="whitespace-pre-wrap break-words">
+                <span className="text-zinc-500">[{formatTime(entry.timestamp)}]</span>{' '}
+                <span className={`${tagColor}`}>[{entry.source}]</span>{' '}
+                {entry.sessionId && <span className="text-blue-300">[{entry.sessionId}]</span>}{' '}
+                <span className={levelColor}>[{entry.level.toUpperCase()}]</span>{' '}
+                <span className="text-gray-200">{entry.message}</span>
+              </div>
+            );
+          })}
+        </div>
+      </div>
     </div>
   );
 }

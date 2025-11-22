@@ -59,6 +59,16 @@ export interface SessionLogEntry {
   message: string;
 }
 
+export type LogSource = 'Chrome' | 'Autogen' | 'Downloader' | 'Pipeline' | string;
+
+export interface AppLogEntry {
+  timestamp: number;
+  source: LogSource;
+  level: 'info' | 'error';
+  message: string;
+  sessionId?: string;
+}
+
 export interface SessionInfo {
   name: string;
   path: string;

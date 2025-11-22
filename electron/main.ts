@@ -39,6 +39,7 @@ import type {
   PipelineProgress
 } from '../shared/types';
 import { sessionLogBroker } from './sessionLogs';
+import { appLogBroker } from './appLogs';
 
 const isDev = process.env.NODE_ENV === 'development';
 
@@ -49,12 +50,28 @@ const sessionRunStates = new Map<string, ManagedSession['status']>();
 let pipelineRunning = false;
 let pipelineCancelled = false;
 
+const mapScopeToSource = (scope: string): 'Chrome' | 'Autogen' | 'Downloader' | 'Pipeline' | string => {
+  if (scope.toLowerCase().includes('download')) return 'Downloader';
+  if (scope.toLowerCase().includes('chrome')) return 'Chrome';
+  if (scope.toLowerCase().includes('pipeline')) return 'Pipeline';
+  return 'Autogen';
+};
+
 const logSession = (sessionId: string, scope: string, message: string, level: 'info' | 'error' = 'info') => {
-  sessionLogBroker.log(sessionId, {
+  const entry = {
     timestamp: Date.now(),
     scope,
     level,
     message
+  };
+
+  sessionLogBroker.log(sessionId, entry);
+  appLogBroker.log({
+    timestamp: entry.timestamp,
+    source: mapScopeToSource(scope),
+    level: entry.level,
+    message: `[${sessionId}] ${entry.message}`,
+    sessionId
   });
 };
 
@@ -77,6 +94,13 @@ const emitPipelineProgress = (payload: PipelineProgress) => {
   mainWindow?.webContents.send('pipeline:progress', {
     timestamp: Date.now(),
     ...payload
+  });
+
+  appLogBroker.log({
+    timestamp: Date.now(),
+    source: 'Pipeline',
+    level: payload.status === 'error' ? 'error' : 'info',
+    message: `${payload.stepType} - ${payload.message}`
   });
 };
 
@@ -365,6 +389,21 @@ const registerIpc = () => {
   ipcMain.handle('sessions:logs:unsubscribe', (event, id: string) => {
     sessionLogBroker.unsubscribe(id, event.sender.id);
     return { ok: true };
+  });
+
+  ipcMain.handle('logs:subscribe', (event) => {
+    appLogBroker.subscribe(event.sender);
+    return { ok: true };
+  });
+
+  ipcMain.handle('logs:unsubscribe', (event) => {
+    appLogBroker.unsubscribe(event.sender.id);
+    return { ok: true };
+  });
+
+  ipcMain.handle('logs:export', async () => {
+    const defaultPath = path.join(app.getPath('documents'), 'sora-logs.txt');
+    return appLogBroker.exportLogs(defaultPath);
   });
 
   const setSessionStatus = (id: string, status: ManagedSession['status']) => {
