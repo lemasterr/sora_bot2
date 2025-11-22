@@ -12,6 +12,13 @@ export type Config = {
   downloadTimeoutMs: number;
   maxParallelSessions: number;
   ffmpegPath: string | null;
+  cleanup?: {
+    enabled?: boolean;
+    dryRun?: boolean;
+    retentionDaysDownloads?: number;
+    retentionDaysBlurred?: number;
+    retentionDaysTemp?: number;
+  };
   telegram: {
     enabled: boolean;
     botToken: string | null;
@@ -40,6 +47,13 @@ function defaultConfig(): Config {
     downloadTimeoutMs: 300_000,
     maxParallelSessions: 2,
     ffmpegPath: null,
+    cleanup: {
+      enabled: true,
+      dryRun: false,
+      retentionDaysDownloads: 14,
+      retentionDaysBlurred: 30,
+      retentionDaysTemp: 3,
+    },
     telegram: {
       enabled: false,
       botToken: null,
@@ -80,6 +94,10 @@ function mergeConfig(base: Config, partial?: Partial<Config>): Config {
     telegram: {
       ...base.telegram,
       ...(partial?.telegram ?? {}),
+    },
+    cleanup: {
+      ...base.cleanup,
+      ...(partial?.cleanup ?? {}),
     },
     telegramTemplates: {
       ...base.telegramTemplates,

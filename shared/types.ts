@@ -17,6 +17,13 @@ export interface Config {
   autoSendDownloads?: boolean;
   autoCleanupDownloads?: boolean;
   autoCleanupProfiles?: boolean;
+  cleanup?: {
+    enabled?: boolean;
+    dryRun?: boolean;
+    retentionDaysDownloads?: number;
+    retentionDaysBlurred?: number;
+    retentionDaysTemp?: number;
+  };
   watermarkTemplatePath?: string;
   watermarkConfidence?: number;
   watermarkFrames?: number;

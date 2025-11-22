@@ -16,6 +16,9 @@ contextBridge.exposeInMainWorld('electronAPI', {
     getLast: (sessionId: string): Promise<unknown> =>
       ipcRenderer.invoke('selectorInspector:getLast', sessionId),
   },
+  cleanup: {
+    run: (): Promise<unknown> => ipcRenderer.invoke('cleanup:run'),
+  },
 });
 
 export {};

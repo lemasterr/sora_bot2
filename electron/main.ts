@@ -1,6 +1,7 @@
 import { app, BrowserWindow, ipcMain } from 'electron';
 import { getDailyStats, getTopSessions } from './logging/history';
 import { getLastSelectorForSession, startInspectorForSession } from './automation/selectorInspector';
+import { runCleanupNow, scheduleDailyCleanup } from './maintenance/cleanup';
 
 // Placeholder bootstrap for Electron main process with minimal IPC wiring.
 
@@ -12,6 +13,7 @@ function createMainWindow(): void {
 }
 
 app.whenReady().then(createMainWindow);
+app.whenReady().then(scheduleDailyCleanup);
 
 app.on('window-all-closed', () => {
   if (process.platform !== 'darwin') {
@@ -39,6 +41,10 @@ ipcMain.handle('selectorInspector:start', async (_event, sessionId: string) => {
 
 ipcMain.handle('selectorInspector:getLast', async (_event, sessionId: string) => {
   return getLastSelectorForSession(sessionId);
+});
+
+ipcMain.handle('cleanup:run', async () => {
+  return runCleanupNow();
 });
 
 export {};
