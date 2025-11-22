@@ -1,20 +1,18 @@
+@import './Theme.css';
+
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
 
-:root {
-  color-scheme: dark;
-}
-
 body {
-  @apply bg-gray-950 text-gray-100 antialiased;
+  @apply bg-[#09090b] text-zinc-100 antialiased font-inter;
 }
 
 * {
-  scrollbar-color: #1e293b #0f172a;
+  scrollbar-color: #27272a #09090b;
   scrollbar-width: thin;
 }
 
 a {
-  @apply text-emerald-300 hover:text-emerald-200;
+  @apply text-blue-400 hover:text-blue-300;
 }

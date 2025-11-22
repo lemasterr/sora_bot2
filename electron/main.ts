@@ -27,7 +27,10 @@ const createWindow = () => {
   mainWindow = new BrowserWindow({
     width: 1280,
     height: 800,
-    backgroundColor: '#0f172a',
+    frame: false,
+    titleBarStyle: 'hidden',
+    backgroundColor: '#09090b',
+    autoHideMenuBar: true,
     webPreferences: {
       contextIsolation: true,
       preload: preloadPath
@@ -44,6 +47,14 @@ const createWindow = () => {
 
   mainWindow.on('closed', () => {
     mainWindow = null;
+  });
+
+  mainWindow.on('maximize', () => {
+    mainWindow?.webContents.send('window:maximized', true);
+  });
+
+  mainWindow.on('unmaximize', () => {
+    mainWindow?.webContents.send('window:maximized', false);
   });
 };
 
@@ -94,6 +105,27 @@ const registerIpc = () => {
       throw new Error('Session manager not initialized');
     }
     await sessionManager.writeSessionFiles(name, data);
+  });
+
+  ipcMain.handle('window:minimize', () => {
+    mainWindow?.minimize();
+  });
+
+  ipcMain.handle('window:maximize', () => {
+    if (!mainWindow) return;
+    if (mainWindow.isMaximized()) {
+      mainWindow.unmaximize();
+    } else {
+      mainWindow.maximize();
+    }
+  });
+
+  ipcMain.handle('window:close', () => {
+    mainWindow?.close();
+  });
+
+  ipcMain.handle('window:isMaximized', () => {
+    return mainWindow?.isMaximized() ?? false;
   });
 
   ipcMain.handle('dialog:choose-folder', async () => {

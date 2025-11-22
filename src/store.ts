@@ -4,8 +4,9 @@ import type { Config, SessionInfo } from '../shared/types';
 export type AppPage =
   | 'dashboard'
   | 'sessions'
-  | 'content'
   | 'automator'
+  | 'content'
+  | 'logs'
   | 'watermark'
   | 'telegram'
   | 'settings';

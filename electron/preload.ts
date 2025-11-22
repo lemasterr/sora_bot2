@@ -31,7 +31,11 @@ const electronAPI = {
   generateWatermarkFrames: (videoPath: string): Promise<WatermarkFramesResult> =>
     ipcRenderer.invoke('watermark:frames', videoPath),
   telegramTest: (): Promise<{ ok: boolean; error?: string; details?: string }> =>
-    ipcRenderer.invoke('telegram:test')
+    ipcRenderer.invoke('telegram:test'),
+  windowMinimize: (): Promise<void> => ipcRenderer.invoke('window:minimize'),
+  windowMaximize: (): Promise<void> => ipcRenderer.invoke('window:maximize'),
+  windowClose: (): Promise<void> => ipcRenderer.invoke('window:close'),
+  isWindowMaximized: (): Promise<boolean> => ipcRenderer.invoke('window:isMaximized')
 };
 
 declare global {
