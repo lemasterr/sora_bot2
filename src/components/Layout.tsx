@@ -1,5 +1,6 @@
 import { ReactNode, useMemo, useState } from 'react';
 import { AppPage } from '../store';
+import { QuickAccessPanel } from './QuickAccessPanel';
 import { Sidebar, NavItem } from './Sidebar';
 import { TitleBar } from './TitleBar';
 
@@ -76,10 +77,22 @@ interface LayoutProps {
   pageDescription?: string;
   showOverlay?: boolean;
   overlay?: ReactNode;
+  quickAccessOpen?: boolean;
+  onToggleQuickAccess?: () => void;
   children: ReactNode;
 }
 
-export function Layout({ currentPage, onNavigate, pageTitle, pageDescription, showOverlay, overlay, children }: LayoutProps) {
+export function Layout({
+  currentPage,
+  onNavigate,
+  pageTitle,
+  pageDescription,
+  showOverlay,
+  overlay,
+  quickAccessOpen,
+  onToggleQuickAccess,
+  children,
+}: LayoutProps) {
   const [collapsed, setCollapsed] = useState(false);
 
   const navItems: NavItem[] = useMemo(
@@ -99,7 +112,11 @@ export function Layout({ currentPage, onNavigate, pageTitle, pageDescription, sh
 
   return (
     <div className="relative flex h-screen flex-col bg-[#09090b] text-zinc-100">
-      <TitleBar title={pageTitle} description={pageDescription} />
+      <TitleBar
+        title={pageTitle}
+        description={pageDescription}
+        onToggleQuickAccess={onToggleQuickAccess}
+      />
       <div className="flex min-h-0 flex-1 overflow-hidden">
         <Sidebar
           items={navItems}
@@ -116,6 +133,7 @@ export function Layout({ currentPage, onNavigate, pageTitle, pageDescription, sh
           </main>
         </div>
       </div>
+      <QuickAccessPanel />
       {showOverlay && overlay}
     </div>
   );

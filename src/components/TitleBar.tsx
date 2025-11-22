@@ -3,9 +3,10 @@ import { useEffect, useState } from 'react';
 interface TitleBarProps {
   title: string;
   description?: string;
+  onToggleQuickAccess?: () => void;
 }
 
-export function TitleBar({ title, description }: TitleBarProps) {
+export function TitleBar({ title, description, onToggleQuickAccess }: TitleBarProps) {
   const [isMaximized, setIsMaximized] = useState(false);
 
   useEffect(() => {
@@ -44,6 +45,13 @@ export function TitleBar({ title, description }: TitleBarProps) {
       </div>
 
       <div className="titlebar-no-drag flex items-center gap-2">
+        <button
+          onClick={onToggleQuickAccess}
+          className="titlebar-no-drag flex h-8 items-center gap-2 rounded-md border border-zinc-700 bg-[#101014] px-3 text-xs text-zinc-300 transition hover:border-blue-500 hover:text-white"
+        >
+          <span className="h-2 w-2 rounded-full bg-blue-400" />
+          Quick Access
+        </button>
         <div className="flex items-center gap-2 rounded-lg border border-[#27272a] bg-[#111114] px-2 py-1">
           <div className="h-2 w-2 rounded-full bg-emerald-400" />
           <span className="text-[11px] text-zinc-400">Status: Connected</span>

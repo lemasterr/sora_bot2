@@ -9,6 +9,7 @@ import { TelegramPage } from './components/TelegramPage';
 import { WatermarkPage } from './components/WatermarkPage';
 import { Layout } from './components/Layout';
 import { DownloaderPage } from './components/DownloaderPage';
+import { ErrorBoundary, PageBoundary } from './components/ErrorBoundary';
 import { useAppStore, AppPage } from './store';
 
 const pageTitles: Record<AppPage, { title: string; description: string }> = {
@@ -26,23 +27,59 @@ const pageTitles: Record<AppPage, { title: string; description: string }> = {
 function PageView({ currentPage }: { currentPage: AppPage }) {
   switch (currentPage) {
     case 'dashboard':
-      return <DashboardPage />;
+      return (
+        <PageBoundary title="Dashboard">
+          <DashboardPage />
+        </PageBoundary>
+      );
     case 'sessions':
-      return <SessionsPage />;
+      return (
+        <PageBoundary title="Sessions">
+          <SessionsPage />
+        </PageBoundary>
+      );
     case 'content':
-      return <ContentPage />;
+      return (
+        <PageBoundary title="Content Editor">
+          <ContentPage />
+        </PageBoundary>
+      );
     case 'automator':
-      return <AutomatorPage />;
+      return (
+        <PageBoundary title="Automator">
+          <AutomatorPage />
+        </PageBoundary>
+      );
     case 'downloader':
-      return <DownloaderPage />;
+      return (
+        <PageBoundary title="Downloader">
+          <DownloaderPage />
+        </PageBoundary>
+      );
     case 'watermark':
-      return <WatermarkPage />;
+      return (
+        <PageBoundary title="Watermark">
+          <WatermarkPage />
+        </PageBoundary>
+      );
     case 'telegram':
-      return <TelegramPage />;
+      return (
+        <PageBoundary title="Telegram">
+          <TelegramPage />
+        </PageBoundary>
+      );
     case 'settings':
-      return <SettingsPage />;
+      return (
+        <PageBoundary title="Settings">
+          <SettingsPage />
+        </PageBoundary>
+      );
     case 'logs':
-      return <LogsPage />;
+      return (
+        <PageBoundary title="Logs">
+          <LogsPage />
+        </PageBoundary>
+      );
     default:
       return null;
   }
@@ -65,7 +102,8 @@ const LoadingOverlay = ({ progress, message }: { progress: number; message?: str
 );
 
 function App() {
-  const { currentPage, setCurrentPage, setSessions, setConfig, setSelectedSessionName } = useAppStore();
+  const { currentPage, setCurrentPage, setSessions, setConfig, setSelectedSessionName, quickAccessOpen, toggleQuickAccess } =
+    useAppStore();
   const { title, description } = pageTitles[currentPage];
   const [progress, setProgress] = useState(8);
   const [loading, setLoading] = useState(true);
@@ -88,7 +126,9 @@ function App() {
         const fetchConfig = api.config?.get ?? api.getConfig;
         const config = fetchConfig ? await fetchConfig() : null;
         if (!mounted) return;
-        if (config) {
+        if (config && !(config as any).ok) {
+          console.warn('Config load failed', config);
+        } else if (config) {
           setConfig(config as any);
         }
 
@@ -97,8 +137,10 @@ function App() {
         const fetchSessions = api.sessions?.list ?? api.getSessions;
         const sessions = fetchSessions ? await fetchSessions() : [];
         if (!mounted) return;
-        setSessions(sessions ?? []);
-        setSelectedSessionName((sessions?.[0]?.name as string) ?? null);
+        if (Array.isArray(sessions)) {
+          setSessions(sessions ?? []);
+          setSelectedSessionName((sessions?.[0]?.name as string) ?? null);
+        }
 
         setProgress(90);
         setLoadingMessage('Finalizing UI');
@@ -119,16 +161,20 @@ function App() {
   }, [api, setConfig, setSessions, setSelectedSessionName]);
 
   return (
-    <Layout
-      currentPage={currentPage}
-      onNavigate={setCurrentPage}
-      pageTitle={title}
-      pageDescription={description}
-      showOverlay={loading}
-      overlay={loading ? <LoadingOverlay progress={progress} message={loadingMessage} /> : null}
-    >
-      <PageView currentPage={currentPage} />
-    </Layout>
+    <ErrorBoundary title="App crashed" description="The UI crashed but the shell is still running.">
+      <Layout
+        currentPage={currentPage}
+        onNavigate={setCurrentPage}
+        pageTitle={title}
+        pageDescription={description}
+        showOverlay={loading}
+        overlay={loading ? <LoadingOverlay progress={progress} message={loadingMessage} /> : null}
+        quickAccessOpen={quickAccessOpen}
+        onToggleQuickAccess={toggleQuickAccess}
+      >
+        <PageView currentPage={currentPage} />
+      </Layout>
+    </ErrorBoundary>
   );
 }
 

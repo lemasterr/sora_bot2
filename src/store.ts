@@ -17,10 +17,14 @@ interface AppState {
   sessions: SessionInfo[];
   selectedSessionName: string | null;
   config: Config | null;
+  quickAccessOpen: boolean;
   setCurrentPage: (page: AppPage) => void;
   setSessions: (sessions: SessionInfo[]) => void;
   setSelectedSessionName: (name: string | null) => void;
   setConfig: (config: Config | null) => void;
+  toggleQuickAccess: () => void;
+  openQuickAccess: () => void;
+  closeQuickAccess: () => void;
   loadInitialData: () => Promise<void>;
   refreshSessions: () => Promise<void>;
   refreshConfig: () => Promise<void>;
@@ -31,10 +35,14 @@ export const useAppStore = create<AppState>((set) => ({
   sessions: [],
   selectedSessionName: null,
   config: null,
+  quickAccessOpen: false,
   setCurrentPage: (page: AppPage) => set({ currentPage: page }),
   setSessions: (sessions: SessionInfo[]) => set({ sessions }),
   setSelectedSessionName: (name: string | null) => set({ selectedSessionName: name }),
   setConfig: (config: Config | null) => set({ config }),
+  toggleQuickAccess: () => set((state) => ({ quickAccessOpen: !state.quickAccessOpen })),
+  openQuickAccess: () => set({ quickAccessOpen: true }),
+  closeQuickAccess: () => set({ quickAccessOpen: false }),
   loadInitialData: async () => {
     const api = window.electronAPI;
     if (!api) return;
