@@ -1,4 +1,4 @@
-import { SessionRecord } from "../sessions/types";
+import { Session } from "../sessions/types";
 
 export interface PromptRunResult {
   ok: boolean;
@@ -7,7 +7,7 @@ export interface PromptRunResult {
   error?: string;
 }
 
-export const runPrompts = async (_session: SessionRecord): Promise<PromptRunResult> => {
+export const runPrompts = async (_session: Session): Promise<PromptRunResult> => {
   throw new Error("Not implemented");
 };
 

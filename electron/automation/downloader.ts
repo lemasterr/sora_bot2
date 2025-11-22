@@ -1,4 +1,4 @@
-import { SessionRecord } from "../sessions/types";
+import { Session } from "../sessions/types";
 
 export interface DownloadStats {
   ok: boolean;
@@ -8,15 +8,15 @@ export interface DownloadStats {
   error?: string;
 }
 
-export const openDrafts = async (_session: SessionRecord): Promise<void> => {
+export const openDrafts = async (_session: Session): Promise<void> => {
   throw new Error("Not implemented");
 };
 
-export const scanDrafts = async (_session: SessionRecord): Promise<number> => {
+export const scanDrafts = async (_session: Session): Promise<number> => {
   throw new Error("Not implemented");
 };
 
-export const runDownloads = async (_session: SessionRecord): Promise<DownloadStats> => {
+export const runDownloads = async (_session: Session): Promise<DownloadStats> => {
   throw new Error("Not implemented");
 };
 

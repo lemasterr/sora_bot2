@@ -1,4 +1,4 @@
-import { SessionRecord } from "../sessions/types";
+import { Session } from "../sessions/types";
 import { DownloadStats } from "./downloader";
 import { PromptRunResult } from "./promptsRunner";
 
@@ -33,7 +33,10 @@ export interface PipelineResult {
   downloads?: DownloadStats[];
 }
 
-export const runPipeline = async (_steps: PipelineStep[], _sessionLookup: (id: string) => SessionRecord | null): Promise<PipelineResult> => {
+export const runPipeline = async (
+  _steps: PipelineStep[],
+  _sessionLookup: (id: string) => Session | null,
+): Promise<PipelineResult> => {
   throw new Error("Not implemented");
 };
 
