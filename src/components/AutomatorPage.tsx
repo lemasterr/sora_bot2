@@ -30,12 +30,17 @@ export const AutomatorPage: React.FC = () => {
   const [steps, setSteps] = useState<UiStep[]>([createStep()]);
   const [logs, setLogs] = useState<PipelineProgress[]>([]);
   const [status, setStatus] = useState<'idle' | 'running' | 'success' | 'error'>('idle');
+  const [warning, setWarning] = useState<string>('');
 
   const sessionOptions = useMemo(() => sessions.map((s) => s.name), [sessions]);
   const statusColor =
     status === 'running' ? 'bg-blue-500' : status === 'success' ? 'bg-emerald-500' : status === 'error' ? 'bg-red-500' : 'bg-zinc-700';
 
   useEffect(() => {
+    if (!window.electronAPI?.pipeline?.onProgress) {
+      setWarning('Pipeline IPC is unavailable in this build.');
+      return;
+    }
     const unsubscribe = window.electronAPI.pipeline.onProgress((progress) => {
       setLogs((prev) => [progress, ...prev].slice(0, 3));
       if (progress.stepType === 'pipeline') {
@@ -45,7 +50,7 @@ export const AutomatorPage: React.FC = () => {
       }
     });
 
-    return () => unsubscribe();
+    return () => unsubscribe?.();
   }, []);
 
   const updateStep = (id: string, partial: Partial<UiStep>) => {
@@ -62,6 +67,10 @@ export const AutomatorPage: React.FC = () => {
   };
 
   const startPipeline = async () => {
+    if (!window.electronAPI?.pipeline?.run) {
+      setWarning('Pipeline run API not available.');
+      return;
+    }
     setStatus('running');
     const payload: PipelineStep[] = steps.map(({ id, ...rest }) => ({ ...rest }));
     const result = await window.electronAPI.pipeline.run(payload);
@@ -71,6 +80,7 @@ export const AutomatorPage: React.FC = () => {
   };
 
   const stopPipeline = async () => {
+    if (!window.electronAPI?.pipeline?.stop) return;
     await window.electronAPI.pipeline.stop();
     setStatus('idle');
   };
@@ -193,6 +203,9 @@ export const AutomatorPage: React.FC = () => {
             <p className="text-xs text-zinc-500">Latest pipeline events</p>
           </div>
         </div>
+        {warning && (
+          <div className="rounded-lg border border-amber-500/60 bg-amber-500/10 px-3 py-2 text-xs text-amber-100">{warning}</div>
+        )}
         <div className="space-y-2 text-sm font-mono text-zinc-200">
           {logs.length === 0 && <div className="text-zinc-500">No events yet.</div>}
           {logs.map((log, idx) => (

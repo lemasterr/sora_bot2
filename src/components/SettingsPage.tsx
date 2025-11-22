@@ -2,18 +2,38 @@ import React, { useEffect, useState } from 'react';
 import { useAppStore } from '../store';
 import type { ChromeProfile, Config } from '../shared/types';
 
+const DEFAULT_CONFIG: Config = {
+  sessionsRoot: '',
+  chromeExecutablePath: '',
+  chromeUserDataDir: '',
+  ffmpegPath: '',
+  promptDelayMs: 1500,
+  draftTimeoutMs: 30000,
+  downloadTimeoutMs: 60000,
+  maxParallelSessions: 1,
+  activeChromeProfile: '',
+};
+
 export const SettingsPage: React.FC = () => {
   const { config, refreshConfig, setConfig } = useAppStore();
-  const [draft, setDraft] = useState<Config | null>(config);
+  const [draft, setDraft] = useState<Config | null>(config ?? DEFAULT_CONFIG);
   const [status, setStatus] = useState('');
   const [testStatus, setTestStatus] = useState('');
   const [profiles, setProfiles] = useState<ChromeProfile[]>([]);
   const [editingProfile, setEditingProfile] = useState<ChromeProfile | null>(null);
 
   useEffect(() => {
-    setDraft(config);
-    if (config?.chromeProfiles) {
-      setProfiles(config.chromeProfiles);
+    const normalized = config
+      ? {
+          ...DEFAULT_CONFIG,
+          ...config,
+          activeChromeProfile:
+            (config as any).activeChromeProfile ?? (config as any).chromeActiveProfileName ?? (config as any).chromeActiveProfile,
+        }
+      : DEFAULT_CONFIG;
+    setDraft(normalized);
+    if ((normalized as any)?.chromeProfiles) {
+      setProfiles((normalized as any).chromeProfiles);
     }
   }, [config]);
 
@@ -24,58 +44,66 @@ export const SettingsPage: React.FC = () => {
 
   const save = async () => {
     if (!draft) return;
-    const updated = await window.electronAPI.updateConfig(draft);
-    setConfig(updated);
+    const configApi = window.electronAPI?.config ?? null;
+    const update = configApi?.update ?? window.electronAPI?.updateConfig;
+    if (!update) {
+      setStatus('Config API unavailable');
+      return;
+    }
+    const payload: any = {
+      ...draft,
+      chromeActiveProfileName: (draft as any).activeChromeProfile ?? null,
+    };
+    const updated = await update(payload);
+    setConfig(updated as any);
     setStatus('Saved');
   };
 
   const browseSessions = async () => {
-    const dir = await window.electronAPI.chooseSessionsRoot();
+    const dir = await (window.electronAPI?.config as any)?.chooseSessionsRoot?.();
     if (dir) {
       updateField('sessionsRoot', dir);
     }
   };
 
   const loadProfiles = async () => {
-    if (!window.electronAPI?.chrome) return;
-    const list = await window.electronAPI.chrome.list();
-    setProfiles(list);
+    const list = (await window.electronAPI?.chrome?.list?.()) ?? (await window.electronAPI?.chrome?.scanProfiles?.());
+    if (list) setProfiles(list);
   };
 
   const scanProfiles = async () => {
-    if (!window.electronAPI?.chrome) return;
-    const list = await window.electronAPI.chrome.scan();
+    const list = (await window.electronAPI?.chrome?.scan?.()) ?? (await window.electronAPI?.chrome?.scanProfiles?.());
     setProfiles(list);
     setStatus('Chrome profiles scanned');
     refreshConfig();
   };
 
   const setActiveProfile = async (name: string) => {
-    if (!window.electronAPI?.chrome) return;
-    const list = await window.electronAPI.chrome.setActive(name);
-    setProfiles(list);
+    const list =
+      (await window.electronAPI?.chrome?.setActive?.(name)) ?? (await window.electronAPI?.chrome?.setActiveProfile?.(name));
+    if (list) setProfiles(list);
     refreshConfig();
   };
 
   const saveProfile = async (profile: ChromeProfile) => {
-    if (!window.electronAPI?.chrome) return;
-    const list = await window.electronAPI.chrome.save(profile);
-    setProfiles(list);
+    const list =
+      (await window.electronAPI?.chrome?.save?.(profile)) ??
+      (await window.electronAPI?.chrome?.setActiveProfile?.(profile.name));
+    if (list) setProfiles(list);
     setEditingProfile(null);
     refreshConfig();
   };
 
   const removeProfile = async (name: string) => {
-    if (!window.electronAPI?.chrome) return;
-    const list = await window.electronAPI.chrome.remove(name);
-    setProfiles(list);
+    const list = (await window.electronAPI?.chrome?.remove?.(name)) ?? (await window.electronAPI?.chrome?.scanProfiles?.());
+    if (list) setProfiles(list);
     refreshConfig();
   };
 
   const sendTestMessage = async () => {
-    if (!window.electronAPI?.telegramTest) return;
+    if (!window.electronAPI?.telegramTest && !window.electronAPI?.telegram?.test) return;
     setTestStatus('Sending...');
-    const result = await window.electronAPI.telegramTest();
+    const result = (await window.electronAPI?.telegram?.test?.()) ?? (await window.electronAPI?.telegramTest?.());
     if (result.ok) {
       setTestStatus('Test message sent');
     } else {

@@ -74,10 +74,12 @@ interface LayoutProps {
   onNavigate: (page: AppPage) => void;
   pageTitle: string;
   pageDescription?: string;
+  showOverlay?: boolean;
+  overlay?: ReactNode;
   children: ReactNode;
 }
 
-export function Layout({ currentPage, onNavigate, pageTitle, pageDescription, children }: LayoutProps) {
+export function Layout({ currentPage, onNavigate, pageTitle, pageDescription, showOverlay, overlay, children }: LayoutProps) {
   const [collapsed, setCollapsed] = useState(false);
 
   const navItems: NavItem[] = useMemo(
@@ -96,7 +98,7 @@ export function Layout({ currentPage, onNavigate, pageTitle, pageDescription, ch
   );
 
   return (
-    <div className="flex h-screen flex-col bg-[#09090b] text-zinc-100">
+    <div className="relative flex h-screen flex-col bg-[#09090b] text-zinc-100">
       <TitleBar title={pageTitle} description={pageDescription} />
       <div className="flex min-h-0 flex-1 overflow-hidden">
         <Sidebar
@@ -107,11 +109,14 @@ export function Layout({ currentPage, onNavigate, pageTitle, pageDescription, ch
           onToggleCollapse={() => setCollapsed((c) => !c)}
         />
         <div className="flex min-w-0 flex-1 overflow-hidden bg-[#0d0d10]">
-          <main className="flex h-full flex-col gap-4 overflow-y-auto bg-gradient-to-br from-blue-600/10 to-transparent p-6 animate-fade-in">
-            {children}
+          <main className="flex h-full w-full justify-center overflow-y-auto bg-gradient-to-br from-blue-600/10 to-transparent p-6 animate-fade-in">
+            <div className="flex h-full w-full max-w-6xl flex-col gap-4">
+              {children}
+            </div>
           </main>
         </div>
       </div>
+      {showOverlay && overlay}
     </div>
   );
 }
