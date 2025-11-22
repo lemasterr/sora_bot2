@@ -13,6 +13,7 @@
   },
   "dependencies": {
     "electron": "28.3.3",
+    "image-size": "1.1.1",
     "puppeteer-core": "23.5.3",
     "react": "19.0.0",
     "react-dom": "19.0.0",

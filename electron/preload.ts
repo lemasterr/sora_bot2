@@ -10,6 +10,9 @@ import type {
   SessionFiles,
   SessionInfo,
   WatermarkFramesResult,
+  WatermarkDetectionResult,
+  WatermarkMask,
+  WatermarkCleanResult,
   PipelineStep,
   PipelineProgress
 } from '../shared/types';
@@ -42,6 +45,15 @@ const electronAPI = {
   },
   generateWatermarkFrames: (videoPath: string): Promise<WatermarkFramesResult> =>
     ipcRenderer.invoke('watermark:frames', videoPath),
+  watermark: {
+    detect: (videoPath: string, templatePath?: string): Promise<WatermarkDetectionResult> =>
+      ipcRenderer.invoke('watermark:detect', videoPath, templatePath),
+    listMasks: (): Promise<WatermarkMask[]> => ipcRenderer.invoke('watermark:masks:list'),
+    saveMask: (mask: WatermarkMask): Promise<WatermarkMask[]> => ipcRenderer.invoke('watermark:masks:save', mask),
+    removeMask: (id: string): Promise<WatermarkMask[]> => ipcRenderer.invoke('watermark:masks:remove', id),
+    clean: (videoPaths: string[], maskId?: string): Promise<WatermarkCleanResult> =>
+      ipcRenderer.invoke('watermark:clean', videoPaths, maskId)
+  },
   telegramTest: (): Promise<{ ok: boolean; error?: string; details?: string }> =>
     ipcRenderer.invoke('telegram:test'),
   windowMinimize: (): Promise<void> => ipcRenderer.invoke('window:minimize'),

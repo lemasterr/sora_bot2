@@ -4,7 +4,14 @@ import { loadConfig, saveConfig } from './config';
 import { SessionManager } from './sessionManager';
 import { cancelSessionRun, openDrafts, runDownloads, runPrompts, scanDrafts } from './automation/sessionAutomation';
 import { setChromeExecutablePath, type SessionRunContext } from './automation/chromeController';
-import { generateWatermarkFrames } from './watermark';
+import {
+  detectWatermark,
+  generateWatermarkFrames,
+  listMasks,
+  removeMask,
+  runWatermarkCleaner,
+  saveMask
+} from './watermark';
 import { sendTestMessage } from './telegram';
 import {
   listChromeProfiles,
@@ -22,6 +29,9 @@ import type {
   SessionFiles,
   SessionInfo,
   WatermarkFramesResult,
+  WatermarkDetectionResult,
+  WatermarkMask,
+  WatermarkCleanResult,
   ChromeProfile,
   ManagedSession,
   SessionCommandAction,
@@ -514,6 +524,65 @@ const registerIpc = () => {
     }
     return generateWatermarkFrames(videoPath, currentConfig.ffmpegPath);
   });
+
+  ipcMain.handle(
+    'watermark:detect',
+    async (_event, videoPath: string, templatePath?: string): Promise<WatermarkDetectionResult> => {
+      if (!currentConfig) {
+        currentConfig = await loadConfig();
+      }
+      if (!currentConfig.ffmpegPath) {
+        throw new Error('ffmpeg path is not configured');
+      }
+      return detectWatermark(videoPath, templatePath, currentConfig.ffmpegPath);
+    }
+  );
+
+  ipcMain.handle('watermark:masks:list', async (): Promise<WatermarkMask[]> => {
+    if (!currentConfig) {
+      currentConfig = await loadConfig();
+    }
+    return listMasks(currentConfig);
+  });
+
+  ipcMain.handle('watermark:masks:save', async (_event, mask: WatermarkMask): Promise<WatermarkMask[]> => {
+    if (!currentConfig) {
+      currentConfig = await loadConfig();
+    }
+    const masks = await saveMask(mask, currentConfig);
+    currentConfig.watermarkMasks = masks;
+    currentConfig.activeWatermarkMaskId = mask.id ?? mask.name;
+    await saveConfig(currentConfig);
+    return masks;
+  });
+
+  ipcMain.handle('watermark:masks:remove', async (_event, id: string): Promise<WatermarkMask[]> => {
+    if (!currentConfig) {
+      currentConfig = await loadConfig();
+    }
+    const masks = removeMask(id, currentConfig);
+    currentConfig.watermarkMasks = masks;
+    if (currentConfig.activeWatermarkMaskId === id) {
+      currentConfig.activeWatermarkMaskId = masks[0]?.id;
+    }
+    await saveConfig(currentConfig);
+    return masks;
+  });
+
+  ipcMain.handle(
+    'watermark:clean',
+    async (_event, videoPaths: string[], maskId?: string): Promise<WatermarkCleanResult> => {
+      if (!currentConfig) {
+        currentConfig = await loadConfig();
+      }
+      const result = await runWatermarkCleaner(videoPaths, maskId, currentConfig);
+      if (result.ok) {
+        currentConfig.activeWatermarkMaskId = maskId ?? currentConfig.activeWatermarkMaskId;
+        await saveConfig(currentConfig);
+      }
+      return result;
+    }
+  );
 
   ipcMain.handle('telegram:test', async (): Promise<{ ok: boolean; error?: string; details?: string }> => {
     if (!currentConfig) {

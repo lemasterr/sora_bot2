@@ -12,6 +12,8 @@ export interface Config {
   chromeProfiles?: ChromeProfile[];
   activeChromeProfile?: string;
   sessions?: ManagedSession[];
+  watermarkMasks?: WatermarkMask[];
+  activeWatermarkMaskId?: string;
 }
 
 export interface ChromeProfile {
@@ -93,6 +95,46 @@ export interface DownloadedVideo {
 export interface WatermarkFramesResult {
   frames: string[];
   tempDir: string;
+}
+
+export interface WatermarkRect {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  label?: string;
+}
+
+export interface WatermarkMask {
+  id: string;
+  name: string;
+  rects: WatermarkRect[];
+  updatedAt?: number;
+}
+
+export interface WatermarkDetectionFrame {
+  path: string;
+  width: number;
+  height: number;
+  rects: WatermarkRect[];
+}
+
+export interface WatermarkDetectionResult {
+  frames: WatermarkDetectionFrame[];
+  suggestedMask?: WatermarkMask;
+}
+
+export interface WatermarkCleanItemResult {
+  video: string;
+  output?: string;
+  status: 'cleaned' | 'skipped' | 'error';
+  message?: string;
+}
+
+export interface WatermarkCleanResult {
+  ok: boolean;
+  items: WatermarkCleanItemResult[];
+  error?: string;
 }
 
 export type PipelineStepType =

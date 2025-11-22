@@ -14,7 +14,9 @@ const defaultConfig = (): Config => ({
   autoSendDownloads: false,
   chromeProfiles: [],
   activeChromeProfile: undefined,
-  sessions: []
+  sessions: [],
+  watermarkMasks: [],
+  activeWatermarkMaskId: undefined
 });
 
 const getConfigPath = () => path.join(app.getPath('userData'), 'config.json');
