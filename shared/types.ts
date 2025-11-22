@@ -11,6 +11,7 @@ export interface Config {
   autoSendDownloads?: boolean;
   chromeProfiles?: ChromeProfile[];
   activeChromeProfile?: string;
+  sessions?: ManagedSession[];
 }
 
 export interface ChromeProfile {
@@ -18,6 +19,28 @@ export interface ChromeProfile {
   userDataDir: string;
   profileDir: string;
   isActive?: boolean;
+}
+
+export interface ManagedSession {
+  id: string;
+  name: string;
+  chromeProfile?: string;
+  promptProfile?: string;
+  cdpPort?: number;
+  promptsFile?: string;
+  imagePromptsFile?: string;
+  titlesFile?: string;
+  submittedLog?: string;
+  failedLog?: string;
+  downloadDir?: string;
+  cleanDir?: string;
+  cursorFile?: string;
+  maxVideos?: number;
+  openDrafts?: boolean;
+  autoLaunchChrome?: boolean;
+  autoLaunchAutogen?: boolean;
+  notes?: string;
+  status?: 'idle' | 'running' | 'warning' | 'error';
 }
 
 export interface SessionInfo {

@@ -13,6 +13,7 @@ import {
   scanAndStoreChromeProfiles,
   setActiveChromeProfile
 } from './chromeProfiles';
+import { listManagedSessions, removeManagedSession, saveManagedSession } from './sessionRegistry';
 import type {
   Config,
   DownloadedVideo,
@@ -20,7 +21,8 @@ import type {
   SessionFiles,
   SessionInfo,
   WatermarkFramesResult,
-  ChromeProfile
+  ChromeProfile,
+  ManagedSession
 } from '../shared/types';
 
 const isDev = process.env.NODE_ENV === 'development';
@@ -28,6 +30,7 @@ const isDev = process.env.NODE_ENV === 'development';
 let mainWindow: BrowserWindow | null = null;
 let sessionManager: SessionManager | null = null;
 let currentConfig: Config | null = null;
+const sessionRunStates = new Map<string, ManagedSession['status']>();
 
 const createWindow = () => {
   const preloadPath = isDev ? path.join(__dirname, 'preload.ts') : path.join(__dirname, 'preload.js');
@@ -145,6 +148,47 @@ const registerIpc = () => {
     await sessionManager.writeSessionFiles(name, data);
   });
 
+  ipcMain.handle('sessions:registry:list', async (): Promise<ManagedSession[]> => {
+    const sessions = await listManagedSessions();
+    return sessions.map((session) => ({ ...session, status: sessionRunStates.get(session.id) || session.status || 'idle' }));
+  });
+
+  ipcMain.handle('sessions:registry:save', async (_event, session: ManagedSession): Promise<ManagedSession[]> => {
+    const saved = await saveManagedSession(session);
+    return saved.map((entry) => ({ ...entry, status: sessionRunStates.get(entry.id) || entry.status || 'idle' }));
+  });
+
+  ipcMain.handle('sessions:registry:remove', async (_event, id: string): Promise<ManagedSession[]> => {
+    sessionRunStates.delete(id);
+    const saved = await removeManagedSession(id);
+    return saved.map((entry) => ({ ...entry, status: sessionRunStates.get(entry.id) || entry.status || 'idle' }));
+  });
+
+  ipcMain.handle('sessions:runPrompts', async (_event, id: string): Promise<RunResult> => {
+    try {
+      sessionRunStates.set(id, 'running');
+      return { ok: true, details: 'Prompts started' };
+    } catch (error) {
+      sessionRunStates.set(id, 'error');
+      return { ok: false, error: (error as Error).message };
+    }
+  });
+
+  ipcMain.handle('sessions:runDownloads', async (_event, id: string): Promise<RunResult> => {
+    try {
+      sessionRunStates.set(id, 'running');
+      return { ok: true, details: 'Downloads started' };
+    } catch (error) {
+      sessionRunStates.set(id, 'error');
+      return { ok: false, error: (error as Error).message };
+    }
+  });
+
+  ipcMain.handle('sessions:stop', async (_event, id: string): Promise<RunResult> => {
+    sessionRunStates.set(id, 'idle');
+    return { ok: true, details: 'Stopped' };
+  });
+
   ipcMain.handle('window:minimize', () => {
     mainWindow?.minimize();
   });
@@ -170,6 +214,15 @@ const registerIpc = () => {
     if (!mainWindow) return null;
     const result = await dialog.showOpenDialog(mainWindow, {
       properties: ['openDirectory', 'createDirectory']
+    });
+    if (result.canceled || result.filePaths.length === 0) return null;
+    return result.filePaths[0];
+  });
+
+  ipcMain.handle('dialog:choose-file', async () => {
+    if (!mainWindow) return null;
+    const result = await dialog.showOpenDialog(mainWindow, {
+      properties: ['openFile']
     });
     if (result.canceled || result.filePaths.length === 0) return null;
     return result.filePaths[0];

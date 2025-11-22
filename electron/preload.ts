@@ -3,6 +3,7 @@ import type {
   Config,
   DownloadedVideo,
   ChromeProfile,
+  ManagedSession,
   RunResult,
   SessionFiles,
   SessionInfo,
@@ -23,6 +24,7 @@ const electronAPI = {
   getConfig: (): Promise<Config> => ipcRenderer.invoke('config:get'),
   updateConfig: (partial: Partial<Config>): Promise<Config> => ipcRenderer.invoke('config:update', partial),
   chooseSessionsRoot: (): Promise<string | null> => ipcRenderer.invoke('dialog:choose-folder'),
+  chooseFile: (): Promise<string | null> => ipcRenderer.invoke('dialog:choose-file'),
   runPrompts: (sessionName: string): Promise<RunResult> =>
     ipcRenderer.invoke('automation:run-prompts', sessionName),
   runDownloads: (sessionName: string, maxVideos: number): Promise<RunResult> =>
@@ -43,6 +45,14 @@ const electronAPI = {
     setActive: (name: string): Promise<ChromeProfile[]> => ipcRenderer.invoke('chrome:setActive', name),
     save: (profile: ChromeProfile): Promise<ChromeProfile[]> => ipcRenderer.invoke('chrome:save', profile),
     remove: (name: string): Promise<ChromeProfile[]> => ipcRenderer.invoke('chrome:remove', name)
+  },
+  sessions: {
+    list: (): Promise<ManagedSession[]> => ipcRenderer.invoke('sessions:registry:list'),
+    save: (session: ManagedSession): Promise<ManagedSession[]> => ipcRenderer.invoke('sessions:registry:save', session),
+    remove: (id: string): Promise<ManagedSession[]> => ipcRenderer.invoke('sessions:registry:remove', id),
+    runPrompts: (id: string): Promise<RunResult> => ipcRenderer.invoke('sessions:runPrompts', id),
+    runDownloads: (id: string): Promise<RunResult> => ipcRenderer.invoke('sessions:runDownloads', id),
+    stop: (id: string): Promise<RunResult> => ipcRenderer.invoke('sessions:stop', id)
   }
 };
 

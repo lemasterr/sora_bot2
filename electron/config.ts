@@ -13,7 +13,8 @@ const defaultConfig = (): Config => ({
   maxParallelSessions: 2,
   autoSendDownloads: false,
   chromeProfiles: [],
-  activeChromeProfile: undefined
+  activeChromeProfile: undefined,
+  sessions: []
 });
 
 const getConfigPath = () => path.join(app.getPath('userData'), 'config.json');
