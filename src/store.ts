@@ -36,10 +36,16 @@ export const useAppStore = create<AppState>((set) => ({
   setSelectedSessionName: (name: string | null) => set({ selectedSessionName: name }),
   setConfig: (config: Config | null) => set({ config }),
   loadInitialData: async () => {
-    if (!window.electronAPI) return;
+    const api = window.electronAPI;
+    if (!api) return;
+
+    const fetchSessions = api.sessions?.list ?? api.getSessions;
+    const fetchConfig = api.config?.get ?? api.getConfig;
+    if (!fetchSessions || !fetchConfig) return;
+
     const [sessions, config] = await Promise.all([
-      window.electronAPI.getSessions(),
-      window.electronAPI.getConfig()
+      fetchSessions(),
+      fetchConfig(),
     ]);
 
     set({
@@ -49,16 +55,22 @@ export const useAppStore = create<AppState>((set) => ({
     });
   },
   refreshSessions: async () => {
-    if (!window.electronAPI) return;
-    const sessions = await window.electronAPI.getSessions();
+    const api = window.electronAPI;
+    const fetchSessions = api?.sessions?.list ?? api?.getSessions;
+    if (!fetchSessions) return;
+
+    const sessions = await fetchSessions();
     set((state) => ({
       sessions,
       selectedSessionName: state.selectedSessionName ?? (sessions[0]?.name ?? null)
     }));
   },
   refreshConfig: async () => {
-    if (!window.electronAPI) return;
-    const config = await window.electronAPI.getConfig();
-    set({ config });
+    const api = window.electronAPI;
+    const fetchConfig = api?.config?.get ?? api?.getConfig;
+    if (!fetchConfig) return;
+
+    const config = await fetchConfig();
+    set({ config: config ?? null });
   }
 }));
