@@ -10,6 +10,12 @@ contextBridge.exposeInMainWorld('electronAPI', {
     getTopSessions: (limit: number): Promise<unknown> =>
       ipcRenderer.invoke('analytics:getTopSessions', limit),
   },
+  selectorInspector: {
+    start: (sessionId: string): Promise<unknown> =>
+      ipcRenderer.invoke('selectorInspector:start', sessionId),
+    getLast: (sessionId: string): Promise<unknown> =>
+      ipcRenderer.invoke('selectorInspector:getLast', sessionId),
+  },
 });
 
 export {};

@@ -9,6 +9,7 @@ import { getSessionPaths } from '../sessions/repo';
 import type { Session } from '../sessions/types';
 import { formatTemplate, sendTelegramMessage } from '../integrations/telegram';
 import { heartbeat, startWatchdog, stopWatchdog } from './watchdog';
+import { registerSessionPage, unregisterSessionPage } from './selectorInspector';
 
 export type DownloadRunResult = {
   ok: boolean;
@@ -148,12 +149,14 @@ export async function runDownloads(session: Session, maxVideos: number): Promise
       if (!browser) return;
       if (page) {
         try {
+          unregisterSessionPage(session.id, page);
           await page.close();
         } catch {
           // ignore
         }
       }
       page = await preparePage(browser, paths.downloadDir);
+      registerSessionPage(session.id, page);
       heartbeat(runId);
     };
 
@@ -237,6 +240,7 @@ export async function runDownloads(session: Session, maxVideos: number): Promise
   } finally {
     stopWatchdog(runId);
     cancellationMap.delete(session.id);
+    unregisterSessionPage(session.id, page);
     if (browser) {
       try {
         await browser.close();

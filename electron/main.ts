@@ -1,5 +1,6 @@
 import { app, BrowserWindow, ipcMain } from 'electron';
 import { getDailyStats, getTopSessions } from './logging/history';
+import { getLastSelectorForSession, startInspectorForSession } from './automation/selectorInspector';
 
 // Placeholder bootstrap for Electron main process with minimal IPC wiring.
 
@@ -30,6 +31,14 @@ ipcMain.handle('analytics:getDailyStats', async (_event, days: number) => {
 
 ipcMain.handle('analytics:getTopSessions', async (_event, limit: number) => {
   return getTopSessions(limit ?? 5);
+});
+
+ipcMain.handle('selectorInspector:start', async (_event, sessionId: string) => {
+  return startInspectorForSession(sessionId);
+});
+
+ipcMain.handle('selectorInspector:getLast', async (_event, sessionId: string) => {
+  return getLastSelectorForSession(sessionId);
 });
 
 export {};
