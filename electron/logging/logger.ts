@@ -9,14 +9,30 @@ export type LogEntry = {
 
 export const loggerEvents = new EventEmitter();
 
-export function logInfo(_source: string, _msg: string): void {
-  // TODO: emit info log
+function emit(level: LogEntry['level'], source: string, msg: string): void {
+  const entry: LogEntry = {
+    ts: new Date().toISOString(),
+    level,
+    source,
+    msg,
+  };
+
+  // Mirror to console for debugging and emit to subscribers.
+  // eslint-disable-next-line no-console
+  console[level === 'error' ? 'error' : level === 'warn' ? 'warn' : 'log'](
+    `[${entry.ts}] [${entry.source}] ${entry.level.toUpperCase()}: ${entry.msg}`,
+  );
+  loggerEvents.emit('log', entry);
 }
 
-export function logWarn(_source: string, _msg: string): void {
-  // TODO: emit warn log
+export function logInfo(source: string, msg: string): void {
+  emit('info', source, msg);
 }
 
-export function logError(_source: string, _msg: string): void {
-  // TODO: emit error log
+export function logWarn(source: string, msg: string): void {
+  emit('warn', source, msg);
+}
+
+export function logError(source: string, msg: string): void {
+  emit('error', source, msg);
 }
