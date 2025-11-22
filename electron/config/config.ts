@@ -17,6 +17,10 @@ export type Config = {
     botToken: string | null;
     chatId: string | null;
   };
+  telegramTemplates?: {
+    pipelineFinished?: string;
+    sessionError?: string;
+  };
 };
 
 const CONFIG_FILE = 'config.json';
@@ -37,6 +41,10 @@ function defaultConfig(): Config {
       enabled: false,
       botToken: null,
       chatId: null,
+    },
+    telegramTemplates: {
+      pipelineFinished: undefined,
+      sessionError: undefined,
     },
   };
 }
@@ -66,6 +74,10 @@ function mergeConfig(base: Config, partial?: Partial<Config>): Config {
     telegram: {
       ...base.telegram,
       ...(partial?.telegram ?? {}),
+    },
+    telegramTemplates: {
+      ...base.telegramTemplates,
+      ...(partial?.telegramTemplates ?? {}),
     },
   };
   return next;

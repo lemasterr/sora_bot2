@@ -4,9 +4,10 @@ import type { Browser, Page } from 'puppeteer-core';
 
 import { launchBrowserForSession } from '../chrome/cdp';
 import { getActiveChromeProfile, scanChromeProfiles, type ChromeProfile } from '../chrome/profiles';
-import { getConfig } from '../config/config';
+import { getConfig, type Config } from '../config/config';
 import { getSessionPaths } from '../sessions/repo';
 import type { Session } from '../sessions/types';
+import { formatTemplate, sendTelegramMessage } from '../integrations/telegram';
 
 export type DownloadRunResult = {
   ok: boolean;
@@ -121,9 +122,11 @@ export async function runDownloads(session: Session, maxVideos: number): Promise
 
   let browser: Browser | null = null;
   let downloaded = 0;
+  let config: Config | null = null;
 
   try {
-    const [config, paths] = await Promise.all([getConfig(), getSessionPaths(session)]);
+    const [loadedConfig, paths] = await Promise.all([getConfig(), getSessionPaths(session)]);
+    config = loadedConfig;
     const profile = await resolveProfile(session);
 
     if (!profile) {
@@ -176,7 +179,22 @@ export async function runDownloads(session: Session, maxVideos: number): Promise
 
     return { ok: true, downloaded };
   } catch (error) {
-    return { ok: false, downloaded, error: (error as Error).message };
+    const message = (error as Error).message;
+    if (config?.telegram?.enabled && config.telegramTemplates?.sessionError) {
+      const lower = message.toLowerCase();
+      if (!lower.includes('cloudflare')) {
+        const text = formatTemplate(config.telegramTemplates.sessionError, {
+          session: session.id,
+          submitted: 0,
+          failed: 0,
+          downloaded,
+          durationMinutes: 0,
+          error: message,
+        });
+        await sendTelegramMessage(text);
+      }
+    }
+    return { ok: false, downloaded, error: message };
   } finally {
     cancellationMap.delete(session.id);
     if (browser) {

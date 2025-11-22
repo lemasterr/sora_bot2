@@ -3,6 +3,8 @@ import { getSession, getSessionPaths } from '../sessions/repo';
 import { runPrompts } from './promptsRunner';
 import { runDownloads } from './downloader';
 import { cleanWatermarkBatch } from '../video/ffmpegWatermark';
+import { getConfig } from '../config/config';
+import { formatTemplate, sendTelegramMessage } from '../integrations/telegram';
 
 export type StepType =
   | 'session_prompts'
@@ -31,6 +33,7 @@ export type PipelineStatus = {
 };
 
 let cancelled = false;
+const DEFAULT_TEMPLATE_DATA = { submitted: 0, failed: 0, downloaded: 0 };
 
 function report(onProgress: (status: PipelineStatus) => void, status: PipelineStatus) {
   try {
@@ -58,6 +61,10 @@ export async function runPipeline(
   onProgress: (status: PipelineStatus) => void
 ): Promise<void> {
   cancelled = false;
+  const start = Date.now();
+  let submitted = 0;
+  let failed = 0;
+  let downloaded = 0;
   report(onProgress, { running: true, currentStepId: null, message: 'Pipeline starting' });
 
   try {
@@ -75,7 +82,9 @@ export async function runPipeline(
           const sessions = await resolveSessions(step.sessionIds);
           for (const session of sessions) {
             if (cancelled) break;
-            await runPrompts(session);
+            const result = await runPrompts(session);
+            submitted += result.submitted;
+            failed += result.failed;
           }
           break;
         }
@@ -83,7 +92,8 @@ export async function runPipeline(
           const sessions = await resolveSessions(step.sessionIds);
           for (const session of sessions) {
             if (cancelled) break;
-            await runDownloads(session, step.limit ?? 0);
+            const result = await runDownloads(session, step.limit ?? 0);
+            downloaded += result.downloaded;
           }
           break;
         }
@@ -111,6 +121,22 @@ export async function runPipeline(
       }
     }
   } finally {
+    const durationMinutes = Number(((Date.now() - start) / 1000 / 60).toFixed(2));
+    if (!cancelled) {
+      const config = await getConfig();
+      const template = config.telegramTemplates?.pipelineFinished;
+      if (config.telegram?.enabled && template) {
+        const text = formatTemplate(template, {
+          ...DEFAULT_TEMPLATE_DATA,
+          submitted,
+          failed,
+          downloaded,
+          durationMinutes,
+          session: 'pipeline',
+        });
+        await sendTelegramMessage(text);
+      }
+    }
     report(onProgress, {
       running: false,
       currentStepId: null,
