@@ -1,7 +1,7 @@
 import path from 'path';
 import { app, BrowserWindow, ipcMain, shell } from 'electron';
 import { getConfig, updateConfig } from './config/config';
-import { scanChromeProfiles, setActiveChromeProfile } from './chrome/profiles';
+import { listChromeProfiles, scanChromeProfiles, setActiveChromeProfile } from './chrome/profiles';
 import { getSession, listSessions, saveSession, deleteSession } from './sessions/repo';
 import { runPrompts, cancelPrompts } from './automation/promptsRunner';
 import { runDownloads, cancelDownloads } from './automation/downloader';
@@ -77,8 +77,19 @@ function handle<T extends any[]>(channel: string, fn: (...args: T) => Promise<an
 handle('config:get', async () => getConfig());
 handle('config:update', async (partial) => updateConfig(partial));
 
-handle('chrome:scanProfiles', async () => scanChromeProfiles());
-handle('chrome:setActiveProfile', async (name: string) => setActiveChromeProfile(name));
+handle('chrome:scanProfiles', async () => {
+  const profiles = await scanChromeProfiles();
+  return { ok: true, profiles };
+});
+handle('chrome:listProfiles', async () => {
+  const profiles = await listChromeProfiles();
+  return { ok: true, profiles };
+});
+handle('chrome:setActiveProfile', async (name: string) => {
+  await setActiveChromeProfile(name);
+  const profiles = await listChromeProfiles();
+  return { ok: true, profiles };
+});
 
 handle('sessions:list', async () => listSessions());
 handle('sessions:get', async (id: string) => getSession(id));

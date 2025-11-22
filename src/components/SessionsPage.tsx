@@ -55,8 +55,19 @@ export const SessionsPage: React.FC = () => {
   };
 
   const loadProfiles = async () => {
-    const items = await window.electronAPI.chrome.list();
-    setProfiles(items);
+    const chromeApi = window.electronAPI?.chrome;
+    if (!chromeApi) return;
+
+    const result = (await chromeApi.listProfiles?.()) ?? (await chromeApi.scanProfiles?.());
+    if (Array.isArray(result)) {
+      setProfiles(result);
+    } else if (result && typeof result === 'object') {
+      if ('ok' in result && (result as any).ok && Array.isArray((result as any).profiles)) {
+        setProfiles((result as any).profiles as ChromeProfile[]);
+      } else if (Array.isArray((result as any).profiles)) {
+        setProfiles((result as any).profiles as ChromeProfile[]);
+      }
+    }
   };
 
   useEffect(() => {

@@ -21,6 +21,8 @@ export const SettingsPage: React.FC = () => {
   const [testStatus, setTestStatus] = useState('');
   const [profiles, setProfiles] = useState<ChromeProfile[]>([]);
   const [editingProfile, setEditingProfile] = useState<ChromeProfile | null>(null);
+  const [scanError, setScanError] = useState('');
+  const [scanning, setScanning] = useState(false);
 
   useEffect(() => {
     const normalized = config
@@ -40,6 +42,28 @@ export const SettingsPage: React.FC = () => {
   const updateField = (key: keyof Config, value: string | number | boolean) => {
     if (!draft) return;
     setDraft({ ...draft, [key]: value } as Config);
+  };
+
+  const extractProfiles = (result: any): ChromeProfile[] => {
+    if (!result) {
+      throw new Error('Chrome profile API unavailable');
+    }
+
+    if (Array.isArray(result)) return result;
+    if (typeof result === 'object') {
+      if ('ok' in result) {
+        if ((result as any).ok) {
+          return ((result as any).profiles as ChromeProfile[]) ?? [];
+        }
+        throw new Error((result as any).error ?? 'Failed to load Chrome profiles');
+      }
+
+      if ('profiles' in result && Array.isArray((result as any).profiles)) {
+        return (result as any).profiles as ChromeProfile[];
+      }
+    }
+
+    throw new Error('Unexpected response from Chrome profile scan');
   };
 
   const save = async () => {
@@ -67,36 +91,79 @@ export const SettingsPage: React.FC = () => {
   };
 
   const loadProfiles = async () => {
-    const list = (await window.electronAPI?.chrome?.list?.()) ?? (await window.electronAPI?.chrome?.scanProfiles?.());
-    if (list) setProfiles(list);
+    try {
+      const response =
+        (await window.electronAPI?.chrome?.listProfiles?.()) ??
+        (await window.electronAPI?.chrome?.scanProfiles?.());
+      const list = extractProfiles(response);
+      setProfiles(list);
+      setScanError('');
+    } catch (error) {
+      setScanError((error as Error).message);
+    }
   };
 
   const scanProfiles = async () => {
-    const list = (await window.electronAPI?.chrome?.scan?.()) ?? (await window.electronAPI?.chrome?.scanProfiles?.());
-    setProfiles(list);
-    setStatus('Chrome profiles scanned');
-    refreshConfig();
+    setScanning(true);
+    setScanError('');
+    setStatus('');
+    try {
+      const response =
+        (await window.electronAPI?.chrome?.scan?.()) ??
+        (await window.electronAPI?.chrome?.scanProfiles?.());
+      const list = extractProfiles(response);
+      setProfiles(list);
+      setStatus(
+        list.length > 0
+          ? 'Chrome profiles scanned successfully'
+          : 'No Chrome profiles found. Please check Chrome installation or user-data-dir.'
+      );
+    } catch (error) {
+      setScanError(`Chrome profiles scan failed: ${(error as Error).message}`);
+    } finally {
+      setScanning(false);
+      refreshConfig();
+    }
   };
 
   const setActiveProfile = async (name: string) => {
-    const list =
-      (await window.electronAPI?.chrome?.setActive?.(name)) ?? (await window.electronAPI?.chrome?.setActiveProfile?.(name));
-    if (list) setProfiles(list);
+    const updateActive =
+      (await window.electronAPI?.chrome?.setActiveProfile?.(name)) ??
+      (await window.electronAPI?.chrome?.setActive?.(name));
+    try {
+      const list = extractProfiles(updateActive);
+      setProfiles(list);
+      setDraft((prev) => (prev ? ({ ...prev, activeChromeProfile: name } as Config) : prev));
+    } catch (error) {
+      setScanError((error as Error).message);
+    }
     refreshConfig();
   };
 
   const saveProfile = async (profile: ChromeProfile) => {
-    const list =
-      (await window.electronAPI?.chrome?.save?.(profile)) ??
-      (await window.electronAPI?.chrome?.setActiveProfile?.(profile.name));
-    if (list) setProfiles(list);
-    setEditingProfile(null);
+    try {
+      const response =
+        (await window.electronAPI?.chrome?.save?.(profile)) ??
+        (await window.electronAPI?.chrome?.scanProfiles?.());
+      const list = extractProfiles(response);
+      setProfiles(list);
+      setEditingProfile(null);
+    } catch (error) {
+      setScanError((error as Error).message);
+    }
     refreshConfig();
   };
 
   const removeProfile = async (name: string) => {
-    const list = (await window.electronAPI?.chrome?.remove?.(name)) ?? (await window.electronAPI?.chrome?.scanProfiles?.());
-    if (list) setProfiles(list);
+    try {
+      const response =
+        (await window.electronAPI?.chrome?.remove?.(name)) ??
+        (await window.electronAPI?.chrome?.scanProfiles?.());
+      const list = extractProfiles(response);
+      setProfiles(list);
+    } catch (error) {
+      setScanError((error as Error).message);
+    }
     refreshConfig();
   };
 
@@ -144,9 +211,10 @@ export const SettingsPage: React.FC = () => {
             </div>
             <button
               onClick={scanProfiles}
-              className="rounded-lg border border-blue-500/60 bg-blue-500/20 px-3 py-2 text-xs font-semibold text-blue-100 transition hover:bg-blue-500/30"
+              disabled={scanning}
+              className="rounded-lg border border-blue-500/60 bg-blue-500/20 px-3 py-2 text-xs font-semibold text-blue-100 transition hover:bg-blue-500/30 disabled:cursor-not-allowed disabled:opacity-60"
             >
-              Scan Profiles
+              {scanning ? 'Scanning…' : 'Scan Profiles'}
             </button>
           </div>
 
@@ -428,9 +496,10 @@ export const SettingsPage: React.FC = () => {
           <div className="flex gap-2">
             <button
               onClick={scanProfiles}
-              className="rounded-lg border border-blue-500/60 bg-blue-500/20 px-3 py-2 text-xs font-semibold text-blue-100 transition hover:bg-blue-500/30"
+              disabled={scanning}
+              className="rounded-lg border border-blue-500/60 bg-blue-500/20 px-3 py-2 text-xs font-semibold text-blue-100 transition hover:bg-blue-500/30 disabled:cursor-not-allowed disabled:opacity-60"
             >
-              Scan Chrome Profiles
+              {scanning ? 'Scanning…' : 'Scan Chrome Profiles'}
             </button>
             <button
               onClick={startCreateProfile}
@@ -440,6 +509,15 @@ export const SettingsPage: React.FC = () => {
             </button>
           </div>
         </div>
+
+        {scanError && (
+          <div className="mt-3 rounded-lg border border-rose-500/60 bg-rose-500/10 px-3 py-2 text-xs text-rose-100">
+            {scanError}
+          </div>
+        )}
+        {!scanError && status && (
+          <div className="mt-3 text-xs text-zinc-300">{status}</div>
+        )}
 
         {editingProfile && (
           <div className="mt-3 rounded-lg border border-zinc-800 bg-zinc-950 p-4">

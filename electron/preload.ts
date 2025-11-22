@@ -17,6 +17,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   },
   chrome: {
     scanProfiles: (): Promise<unknown> => safeInvoke('chrome:scanProfiles'),
+    listProfiles: (): Promise<unknown> => safeInvoke('chrome:listProfiles'),
     setActiveProfile: (name: string): Promise<unknown> => safeInvoke('chrome:setActiveProfile', name),
   },
   sessions: {
