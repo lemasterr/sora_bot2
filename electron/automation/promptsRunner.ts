@@ -138,22 +138,23 @@ export async function runPrompts(session: Session): Promise<PromptsRunResult> {
       const promptText = prompts[index];
       if (!promptText || !page) continue;
       assertPage(page);
+      const activePage = page as any;
 
       const imagePath = imagePrompts[index];
 
       try {
-        await page.click(PROMPT_SELECTOR, { clickCount: 3 });
-        await page.keyboard.press('Backspace');
-        await page.type(PROMPT_SELECTOR, promptText);
+        await activePage.click(PROMPT_SELECTOR, { clickCount: 3 });
+        await activePage.keyboard.press('Backspace');
+        await activePage.type(PROMPT_SELECTOR, promptText);
 
         if (imagePath) {
-          const input = await page.$(FILE_INPUT_SELECTOR);
+          const input = await activePage.$(FILE_INPUT_SELECTOR);
           if (input) {
             await input.uploadFile(imagePath);
           }
         }
 
-        await page.click(SUBMIT_SELECTOR);
+        await activePage.click(SUBMIT_SELECTOR);
         await delay(config.promptDelayMs);
         heartbeat(runId);
 

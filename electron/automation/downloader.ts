@@ -196,7 +196,8 @@ export async function runDownloads(session: Session, maxVideos: number): Promise
 
       heartbeat(runId);
       assertPage(page);
-      const cards = await page.$$(CARD_SELECTOR);
+      const activePage = page as any;
+      const cards = await activePage.$$(CARD_SELECTOR);
       const maxCount = Math.min(cards.length, titles.length, hardCap > 0 ? hardCap : Number.POSITIVE_INFINITY);
       if (cards.length === 0 || index >= maxCount) break;
 
@@ -205,10 +206,10 @@ export async function runDownloads(session: Session, maxVideos: number): Promise
 
       try {
         await card.click();
-        await page.waitForSelector(DOWNLOAD_BUTTON_SELECTOR, { timeout: 60_000 });
+        await activePage.waitForSelector(DOWNLOAD_BUTTON_SELECTOR, { timeout: 60_000 });
 
         const downloadPromise = waitForDownload(page, config.downloadTimeoutMs);
-        await page.click(DOWNLOAD_BUTTON_SELECTOR);
+        await activePage.click(DOWNLOAD_BUTTON_SELECTOR);
         await downloadPromise;
 
         const latest = await findLatestMp4(paths.downloadDir);
