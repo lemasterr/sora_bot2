@@ -255,11 +255,12 @@ export async function attachExistingChromeForProfile(
   }
 
   const { userDataDir } = await resolveProfileLaunchTarget(profile);
-  const endpoint = `http://${CDP_HOST}:${port}`;
+  const requestedEndpoint = `http://${CDP_HOST}:${port}`;
+  let targetEndpoint: string | null = null;
 
-  // ВАЖНО: здесь НЕ спавним Chrome, только проверяем наличие CDP
-  let targetEndpoint = endpoint;
-  if (!(await isEndpointAvailable(endpoint))) {
+  if (await isEndpointAvailable(requestedEndpoint)) {
+    targetEndpoint = requestedEndpoint;
+  } else {
     const activePort = await readDevToolsActivePort(userDataDir);
     console.info('[chrome] attachExistingChromeForProfile: DevToolsActivePort read', {
       userDataDir,
@@ -278,16 +279,16 @@ export async function attachExistingChromeForProfile(
     }
   }
 
-  if (!(await isEndpointAvailable(targetEndpoint))) {
-    console.error('[chrome] attachExistingChromeForProfile: no DevTools endpoint detected', {
-      requestedPort: port,
-      finalTargetEndpoint: targetEndpoint,
-      userDataDir,
-    });
-    throw new Error(
-      `Chrome is not running with remote debugging on port ${port}. ` +
-        `Start Chrome for this session first (Start Chrome) or launch Chrome manually with "--remote-debugging-port=${port}".`
+  if (!targetEndpoint) {
+    console.warn(
+      '[chrome] attachExistingChromeForProfile: no DevTools endpoint found, falling back to getOrLaunchChromeForProfile',
+      {
+        requestedPort: port,
+        userDataDir,
+      }
     );
+
+    return getOrLaunchChromeForProfile(profile, port);
   }
 
   const browser = (await puppeteer.connect({
@@ -306,7 +307,7 @@ export async function attachExistingChromeForProfile(
     port: Number(new URL(targetEndpoint).port),
     userDataDir: profile.userDataDir,
     profileDirectory: profile.profileDirectory ?? profile.profileDir ?? 'Default',
-    spawned: false,
+    spawned: existing?.spawned ?? false,
     childPid: existing?.childPid,
   });
 
