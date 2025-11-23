@@ -682,7 +682,7 @@ export const SettingsPage: React.FC = () => {
               <div className="mt-3 space-y-1 text-xs text-zinc-400">
                 <div>
                   <span className="font-semibold text-zinc-300">user-data-dir:</span>
-                  <div className="truncate text-[11px] text-zinc-400">{profile.userDataDir}</div>
+                  <div className="truncate text-[11px] text-zinc-400">{profile.path || profile.userDataDir}</div>
                 </div>
                 <div>
                   <span className="font-semibold text-zinc-300">profile-directory:</span>

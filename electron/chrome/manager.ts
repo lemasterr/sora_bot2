@@ -4,8 +4,7 @@ import http from 'http';
 import path from 'path';
 import puppeteer, { type Browser } from 'puppeteer-core';
 
-import { getConfig } from '../config/config';
-import { resolveChromeExecutablePath } from './paths';
+import { launchChromeWithCDP, waitForCDP } from '../../core/chrome/chromeLauncher';
 import { ChromeProfile, resolveProfileLaunchTarget } from './profiles';
 
 const CDP_HOST = '127.0.0.1';
@@ -144,29 +143,6 @@ async function isEndpointAvailable(endpoint: string): Promise<boolean> {
   });
 }
 
-async function waitForEndpoint(endpoint: string, timeoutMs = 15000): Promise<void> {
-  const start = Date.now();
-  while (Date.now() - start < timeoutMs) {
-    if (await isEndpointAvailable(endpoint)) return;
-    await delay(250);
-  }
-  throw new Error(
-    [
-      `Chrome CDP endpoint did not open at ${endpoint}.`,
-      '',
-      'This usually means Chrome failed to start with remote debugging enabled.',
-      'Possible reasons:',
-      '  - Chrome is already running for this profile without "--remote-debugging-port".',
-      '  - The specified port is blocked by another process.',
-      '',
-      'Fix:',
-      '  1) Fully quit all Google Chrome windows for this profile (Cmd+Q on macOS, or "Quit" from the Dock).',
-      '  2) In the Sora Bot app, click "Start Chrome" again for this session.',
-      '  3) If the problem persists, try changing the "CDP port" in Settings to a free port (e.g., 9223) and restart the app.',
-    ].join('\n')
-  );
-}
-
 type LaunchInfo = { endpoint: string; alreadyRunning: boolean; childPid?: number };
 
 async function readDevToolsActivePort(userDataDir: string): Promise<number | null> {
@@ -193,12 +169,6 @@ async function ensureChromeWithCDP(profile: ChromeProfile, port: number): Promis
   if (await isEndpointAvailable(endpoint)) {
     return { endpoint, alreadyRunning: true };
   }
-
-  const config = await getConfig();
-  const executablePath = await resolveChromeExecutablePath().catch((error) => {
-    if (config.chromeExecutablePath) return config.chromeExecutablePath;
-    throw error;
-  });
 
   const { userDataDir, profileDirectoryArg } = await resolveProfileLaunchTarget(profile);
   // NOTE:
@@ -244,58 +214,23 @@ async function ensureChromeWithCDP(profile: ChromeProfile, port: number): Promis
       throw new Error(`Chrome profile "${profileDirectoryArg}" is missing under ${userDataDir}. Choose another profile.`);
     }
   }
-  const args = [
-    `--remote-debugging-port=${port}`,
-    `--user-data-dir=${userDataDir}`,
-    ...(profileDirectoryArg ? [`--profile-directory=${profileDirectoryArg}`] : []),
-    '--disable-features=AutomationControlled',
-    '--no-first-run',
-    '--no-default-browser-check',
-    '--start-maximized',
-  ];
 
-  const child = spawn(executablePath, args, {
-    detached: true,
-    stdio: 'ignore',
+  const launchResult = await launchChromeWithCDP({
+    profilePath: userDataDir,
+    cdpPort: port,
+    extraArgs: profileDirectoryArg ? [`--profile-directory=${profileDirectoryArg}`] : [],
   });
 
-  child.unref();
+  await waitForCDP(port);
 
-  try {
-    await waitForEndpoint(endpoint);
-  } catch (error) {
-    // Chrome might have selected or retained a different DevTools port; try to detect it before failing.
-    const activePort = await findDevToolsActivePort(new Set([userDataDir, profile.userDataDir].filter(Boolean)));
-    if (activePort) {
-      const activeEndpoint = `http://${CDP_HOST}:${activePort}`;
-      if (await isEndpointAvailable(activeEndpoint)) {
-        console.info('[chrome] detected alternate DevTools port after spawn', {
-          activeEndpoint,
-          requestedPort: port,
-        });
-        return { endpoint: activeEndpoint, alreadyRunning: false, childPid: child.pid };
-      }
-    }
-
-    await terminateSpawnedProcess(child.pid);
-
-    const guidance =
-      'Chrome may already be running for this profile without remote debugging. ' +
-      'Close all Chrome windows for this profile and try "Start Chrome" again, or start Chrome manually with the ' +
-      `"--remote-debugging-port=${port}" flag.`;
-
-    const message = (error as Error)?.message;
-    throw new Error(message ? `${message}. ${guidance}` : guidance);
-  }
-
+  const resolvedEndpoint = `http://${CDP_HOST}:${launchResult.cdpPort}`;
   console.info('[chrome] spawned browser for CDP', {
-    executablePath,
     userDataDir,
     profileDirectory: profileDirectoryArg,
-    cdpPort: port,
+    cdpPort: launchResult.cdpPort,
   });
 
-  return { endpoint, alreadyRunning: false, childPid: child.pid };
+  return { endpoint: resolvedEndpoint, alreadyRunning: false, childPid: launchResult.pid };
 }
 
 function instanceKey(profile: ChromeProfile): string {
