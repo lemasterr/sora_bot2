@@ -259,6 +259,19 @@ async function ensureChromeWithCDP(profile: ChromeProfile, port: number): Promis
   try {
     await waitForEndpoint(endpoint);
   } catch (error) {
+    // Chrome might have selected or retained a different DevTools port; try to detect it before failing.
+    const activePort = await findDevToolsActivePort(new Set([userDataDir, profile.userDataDir].filter(Boolean)));
+    if (activePort) {
+      const activeEndpoint = `http://${CDP_HOST}:${activePort}`;
+      if (await isEndpointAvailable(activeEndpoint)) {
+        console.info('[chrome] detected alternate DevTools port after spawn', {
+          activeEndpoint,
+          requestedPort: port,
+        });
+        return { endpoint: activeEndpoint, alreadyRunning: false, childPid: child.pid };
+      }
+    }
+
     await terminateSpawnedProcess(child.pid);
 
     const guidance =
