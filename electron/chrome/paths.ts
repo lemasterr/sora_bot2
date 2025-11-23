@@ -26,21 +26,13 @@ const macCandidates = (): string[] => [
   '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
   '/Applications/Google Chrome Canary.app/Contents/MacOS/Google Chrome Canary',
   '/Applications/Google Chrome Beta.app/Contents/MacOS/Google Chrome Beta',
-  '/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge',
-  '/Applications/Chromium.app/Contents/MacOS/Chromium',
 ];
 
 const linuxCandidates = (): string[] => [
   'google-chrome',
   'google-chrome-stable',
-  'chromium',
-  'chromium-browser',
-  'microsoft-edge',
   '/usr/bin/google-chrome-stable',
   '/usr/bin/google-chrome',
-  '/usr/bin/chromium',
-  '/usr/bin/chromium-browser',
-  '/usr/bin/microsoft-edge',
   '/opt/google/chrome/chrome',
 ];
 
@@ -61,7 +53,7 @@ async function resolveFromPath(binaryName: string): Promise<string | null> {
 }
 
 /**
- * Try to locate a system Chrome/Edge/Chromium binary using config overrides,
+ * Try to locate a system Google Chrome binary using config overrides,
  * an explicit environment variable, and finally well-known install locations
  * per platform. Returns null if nothing is found so the caller can present a
  * helpful error instead of silently falling back to bundled Chromium.
