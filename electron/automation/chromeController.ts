@@ -1,5 +1,7 @@
 import puppeteer, { Browser, Page } from 'puppeteer-core';
+
 import type { Config } from '../../shared/types';
+import { resolveChromeExecutablePath } from '../chrome/paths';
 
 export type SessionRunContext = {
   sessionName: string;
@@ -10,19 +12,17 @@ export type SessionRunContext = {
   cancelled: boolean;
 };
 
-let chromeExecutablePath = '';
+let chromeExecutablePath: string | null = null;
 
 export const setChromeExecutablePath = (executablePath: string) => {
   chromeExecutablePath = executablePath;
 };
 
 export const launchBrowser = async (ctx: SessionRunContext): Promise<{ browser: Browser }> => {
-  if (!chromeExecutablePath) {
-    throw new Error('Chrome executable path is not configured');
-  }
+  const executablePath = chromeExecutablePath ?? (await resolveChromeExecutablePath());
 
   const browser = await puppeteer.launch({
-    executablePath: chromeExecutablePath,
+    executablePath,
     headless: false,
     userDataDir: ctx.profileDir,
     args: ['--no-sandbox', '--disable-setuid-sandbox']

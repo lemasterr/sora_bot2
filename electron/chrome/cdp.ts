@@ -1,5 +1,7 @@
 import puppeteer, { type Browser } from 'puppeteer-core';
+
 import { getConfig } from '../config/config';
+import { resolveChromeExecutablePath } from './paths';
 import { ChromeProfile } from './profiles';
 
 export async function launchBrowserForSession(
@@ -7,12 +9,16 @@ export async function launchBrowserForSession(
   cdpPort: number
 ): Promise<Browser> {
   const config = await getConfig();
-  if (!config.chromeExecutablePath) {
-    throw new Error('Chrome executable path is not configured');
-  }
+  const executablePath = await resolveChromeExecutablePath().catch((error) => {
+    // fallback to configured path if resolution failed but a path exists
+    if (config.chromeExecutablePath) {
+      return config.chromeExecutablePath;
+    }
+    throw error;
+  });
 
   return puppeteer.launch({
-    executablePath: config.chromeExecutablePath,
+    executablePath,
     headless: false,
     userDataDir: profile.userDataDir,
     args: [
