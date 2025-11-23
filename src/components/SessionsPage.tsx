@@ -12,8 +12,8 @@ const statusColors: Record<NonNullable<ManagedSession['status']>, string> = {
 const emptySession: ManagedSession = {
   id: '',
   name: 'New Session',
-  chromeProfile: undefined,
-  promptProfile: undefined,
+  chromeProfileName: null,
+  promptProfile: null,
   cdpPort: 9222,
   promptsFile: '',
   imagePromptsFile: '',
@@ -55,8 +55,19 @@ export const SessionsPage: React.FC = () => {
   };
 
   const loadProfiles = async () => {
-    const items = await window.electronAPI.chrome.list();
-    setProfiles(items);
+    const chromeApi = window.electronAPI?.chrome;
+    if (!chromeApi) return;
+
+    const result = (await chromeApi.listProfiles?.()) ?? (await chromeApi.scanProfiles?.());
+    if (Array.isArray(result)) {
+      setProfiles(result);
+    } else if (result && typeof result === 'object') {
+      if ('ok' in result && (result as any).ok && Array.isArray((result as any).profiles)) {
+        setProfiles((result as any).profiles as ChromeProfile[]);
+      } else if (Array.isArray((result as any).profiles)) {
+        setProfiles((result as any).profiles as ChromeProfile[]);
+      }
+    }
   };
 
   useEffect(() => {
@@ -85,13 +96,18 @@ export const SessionsPage: React.FC = () => {
   const saveSession = async () => {
     if (!window.electronAPI.sessions) return;
     setSaving(true);
-    const updated = await window.electronAPI.sessions.save(form);
-    setSessions(updated);
-    const current = updated.find((s) => s.id === form.id) || updated[updated.length - 1];
-    if (current) {
-      setSelectedId(current.id);
-      setForm(current);
-    }
+    const saved = await window.electronAPI.sessions.save(form);
+    setSessions((prev) => {
+      const existingIndex = prev.findIndex((s) => s.id === saved.id);
+      if (existingIndex >= 0) {
+        const next = [...prev];
+        next[existingIndex] = saved;
+        return next;
+      }
+      return [...prev, saved];
+    });
+    setSelectedId(saved.id);
+    setForm(saved);
     setSaving(false);
     setActionMessage('Session saved');
   };
@@ -102,20 +118,45 @@ export const SessionsPage: React.FC = () => {
     setActionMessage('');
   };
 
-  const handleAction = async (action: 'prompts' | 'downloads' | 'stop' | 'open') => {
+  const handleAction = async (action: 'prompts' | 'downloads' | 'stop' | 'open' | 'startChrome') => {
     if (!form.id || !window.electronAPI.sessions) return;
-    let result: RunResult;
     if (action === 'open') {
       setOpenWindowId(form.id);
       setActionMessage('Session window opened');
       return;
-    } else if (action === 'prompts') {
-      result = await window.electronAPI.sessions.runPrompts(form.id);
-    } else if (action === 'downloads') {
-      result = await window.electronAPI.sessions.runDownloads(form.id);
-    } else {
-      result = await window.electronAPI.sessions.stop(form.id);
     }
+
+    const autogen = window.electronAPI.autogen;
+    const downloader = window.electronAPI.downloader;
+    let result: RunResult | undefined;
+
+    if (action === 'prompts') {
+      result = (await autogen?.run?.(form.id)) as RunResult;
+      if (!result && window.electronAPI.sessions.runPrompts) {
+        result = await window.electronAPI.sessions.runPrompts(form.id);
+      }
+    } else if (action === 'downloads') {
+      result = (await downloader?.run?.(form.id, { limit: form.maxVideos ?? 0 })) as RunResult;
+      if (!result && window.electronAPI.sessions.runDownloads) {
+        result = await window.electronAPI.sessions.runDownloads(form.id, form.maxVideos);
+      }
+    } else if (action === 'startChrome') {
+      if (window.electronAPI.sessions.command) {
+        result = (await window.electronAPI.sessions.command(form.id, 'startChrome')) as RunResult;
+      }
+    } else {
+      result = (await autogen?.stop?.(form.id)) as RunResult;
+      await downloader?.stop?.(form.id);
+      if (!result && window.electronAPI.sessions.cancelPrompts) {
+        result = await window.electronAPI.sessions.cancelPrompts(form.id);
+      }
+    }
+
+    if (!result) {
+      setActionMessage('No response received');
+      return;
+    }
+
     const message = result.ok ? result.details ?? 'OK' : result.error ?? 'Error';
     setActionMessage(message);
     loadSessions();
@@ -151,7 +192,7 @@ export const SessionsPage: React.FC = () => {
                   {statusDot(session.status || 'idle')}
                   <span className="font-semibold">{session.name}</span>
                 </div>
-                <span className="text-xs text-zinc-400">{session.chromeProfile || 'No profile'}</span>
+                <span className="text-xs text-zinc-400">{session.chromeProfileName || 'No profile'}</span>
               </div>
               <div className="mt-1 text-xs text-zinc-400">{session.promptProfile || 'Prompt profile: default'}</div>
             </button>
@@ -165,18 +206,45 @@ export const SessionsPage: React.FC = () => {
       </div>
 
       <div className="rounded-xl border border-zinc-800 bg-zinc-900/70 p-4">
-          <div className="flex items-center justify-between border-b border-zinc-800 pb-3">
+        <div className="flex items-center justify-between border-b border-zinc-800 pb-3">
           <div>
-            <div className="text-lg font-semibold text-white">{form.name || 'Session Details'}</div>
+            <div className="flex items-center gap-3 text-lg font-semibold text-white">
+              {form.name || 'Session Details'}
+              {form.status && (
+                <span className={`rounded-full px-2 py-0.5 text-xs ${
+                  form.status === 'running'
+                    ? 'bg-emerald-500/20 text-emerald-200'
+                    : form.status === 'warning'
+                    ? 'bg-amber-500/20 text-amber-200'
+                    : form.status === 'error'
+                    ? 'bg-rose-500/20 text-rose-100'
+                    : 'bg-zinc-700/60 text-zinc-200'
+                }`}>
+                  {form.status}
+                </span>
+              )}
+            </div>
             <div className="text-sm text-zinc-400">Configure automation paths and behavior per session.</div>
+            <div className="mt-1 flex flex-wrap gap-3 text-xs text-zinc-500">
+              <span>Prompts: {form.promptCount ?? 0}</span>
+              <span>Titles: {form.titleCount ?? 0}</span>
+              <span>Downloads: {form.downloadedCount ?? 0}</span>
+            </div>
           </div>
-          <div className="flex gap-2">
+          <div className="flex flex-wrap gap-2">
             <button
               onClick={() => handleAction('open')}
               disabled={!form.id}
               className="rounded-lg border border-zinc-700 px-3 py-2 text-sm font-medium text-zinc-200 hover:border-blue-500 hover:text-blue-200 disabled:cursor-not-allowed disabled:opacity-50"
             >
               Open Session Window
+            </button>
+            <button
+              onClick={() => handleAction('startChrome')}
+              disabled={!form.id}
+              className="rounded-lg border border-sky-700 bg-sky-900/60 px-3 py-2 text-sm font-medium text-sky-100 shadow hover:border-sky-500 hover:bg-sky-800 disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              Launch Chrome (CDP port {form.cdpPort ?? 9222})
             </button>
             <button
               onClick={() => handleAction('prompts')}
@@ -217,13 +285,13 @@ export const SessionsPage: React.FC = () => {
               Chrome Profile
               <select
                 className="mt-1 w-full rounded-lg border border-zinc-700 bg-zinc-950 px-3 py-2 text-sm text-white focus:border-blue-500 focus:outline-none"
-                value={form.chromeProfile ?? ''}
-                onChange={(e) => handleChange('chromeProfile', e.target.value || undefined)}
+                value={form.chromeProfileName ?? ''}
+                onChange={(e) => handleChange('chromeProfileName', e.target.value || null)}
               >
                 <option value="">Select profile</option>
                 {profiles.map((profile) => (
                   <option key={profile.name} value={profile.name}>
-                    {profile.name} ({profile.profileDir})
+                    {profile.name} ({profile.profileDirectory ?? profile.profileDir})
                   </option>
                 ))}
               </select>
@@ -362,6 +430,7 @@ export const SessionsPage: React.FC = () => {
                   value={form.maxVideos ?? ''}
                   onChange={(e) => handleChange('maxVideos', Number(e.target.value))}
                 />
+                <span className="text-[11px] text-zinc-500">0 = без ограничения, будет скачано всё найденное</span>
               </label>
               <label className="block text-sm text-zinc-300">
                 Submitted Log
@@ -382,7 +451,7 @@ export const SessionsPage: React.FC = () => {
                   onChange={(e) => handleChange('failedLog', e.target.value)}
                 />
               </label>
-              <label className="flex items-center gap-2 text-sm text-zinc-300">
+              <label className="flex items-center gap-2 text-sm text-zinc-300" title="Открывать первый драфт перед прокруткой">
                 <input
                   type="checkbox"
                   checked={form.openDrafts ?? false}
@@ -394,7 +463,7 @@ export const SessionsPage: React.FC = () => {
             </div>
 
             <div className="flex flex-wrap gap-4 text-sm text-zinc-300">
-              <label className="flex items-center gap-2">
+              <label className="flex items-center gap-2" title="Автоматически запускать Chrome перед шагами сессии">
                 <input
                   type="checkbox"
                   checked={form.autoLaunchChrome ?? false}
@@ -403,7 +472,7 @@ export const SessionsPage: React.FC = () => {
                 />
                 Auto-launch Chrome
               </label>
-              <label className="flex items-center gap-2">
+              <label className="flex items-center gap-2" title="Запускать автоген сразу после открытия сессии">
                 <input
                   type="checkbox"
                   checked={form.autoLaunchAutogen ?? false}

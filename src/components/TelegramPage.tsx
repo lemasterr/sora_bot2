@@ -5,24 +5,26 @@ export const TelegramPage: React.FC = () => {
   const { config, refreshConfig, setConfig } = useAppStore();
   const [botToken, setBotToken] = useState('');
   const [chatId, setChatId] = useState('');
-  const [autoSend, setAutoSend] = useState(false);
+  const [enabled, setEnabled] = useState(false);
   const [status, setStatus] = useState('');
 
   useEffect(() => {
     if (config) {
-      setBotToken(config.telegramBotToken ?? '');
-      setChatId(config.telegramChatId ?? '');
-      setAutoSend(config.autoSendDownloads ?? false);
+      setBotToken(config.telegram?.botToken ?? '');
+      setChatId(config.telegram?.chatId ?? '');
+      setEnabled(config.telegram?.enabled ?? false);
     }
   }, [config]);
 
   const save = async () => {
     const updated = await window.electronAPI.updateConfig({
-      telegramBotToken: botToken,
-      telegramChatId: chatId,
-      autoSendDownloads: autoSend
+      telegram: {
+        enabled,
+        botToken: botToken || null,
+        chatId: chatId || null,
+      },
     });
-    setConfig(updated);
+    setConfig(updated as any);
     setStatus('Saved');
   };
 
@@ -60,8 +62,8 @@ export const TelegramPage: React.FC = () => {
           />
         </div>
         <label className="flex items-center gap-2 text-sm text-slate-200">
-          <input type="checkbox" checked={autoSend} onChange={(e) => setAutoSend(e.target.checked)} />
-          Auto-send downloaded videos
+          <input type="checkbox" checked={enabled} onChange={(e) => setEnabled(e.target.checked)} />
+          Enable Telegram notifications
         </label>
         <div className="flex gap-2">
           <button

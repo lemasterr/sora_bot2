@@ -1,4 +1,5 @@
 import { contextBridge, ipcRenderer } from 'electron';
+import type { DownloadedVideo, SessionCommandAction } from '../shared/types';
 
 const safeInvoke = async (channel: string, ...args: unknown[]) => {
   try {
@@ -11,24 +12,69 @@ const safeInvoke = async (channel: string, ...args: unknown[]) => {
 
 contextBridge.exposeInMainWorld('electronAPI', {
   ping: (): Promise<unknown> => safeInvoke('ping'),
+  listDownloadedVideos: (): Promise<DownloadedVideo[]> => safeInvoke('downloads:list'),
   config: {
     get: (): Promise<unknown> => safeInvoke('config:get'),
     update: (partial: unknown): Promise<unknown> => safeInvoke('config:update', partial),
   },
   chrome: {
     scanProfiles: (): Promise<unknown> => safeInvoke('chrome:scanProfiles'),
+    listProfiles: (): Promise<unknown> => safeInvoke('chrome:listProfiles'),
     setActiveProfile: (name: string): Promise<unknown> => safeInvoke('chrome:setActiveProfile', name),
+    cloneProfile: (): Promise<unknown> => safeInvoke('chrome:cloneProfile'),
   },
   sessions: {
     list: (): Promise<unknown> => safeInvoke('sessions:list'),
     get: (id: string): Promise<unknown> => safeInvoke('sessions:get', id),
     save: (session: unknown): Promise<unknown> => safeInvoke('sessions:save', session),
     delete: (id: string): Promise<unknown> => safeInvoke('sessions:delete', id),
+    command: (sessionId: string, action: SessionCommandAction): Promise<unknown> =>
+      safeInvoke('sessions:command', sessionId, action),
     runPrompts: (id: string): Promise<unknown> => safeInvoke('sessions:runPrompts', id),
     cancelPrompts: (id: string): Promise<unknown> => safeInvoke('sessions:cancelPrompts', id),
     runDownloads: (id: string, maxVideos?: number): Promise<unknown> =>
       safeInvoke('sessions:runDownloads', id, maxVideos ?? 0),
     cancelDownloads: (id: string): Promise<unknown> => safeInvoke('sessions:cancelDownloads', id),
+    subscribeLogs: (sessionId: string, cb: (entry: unknown) => void) => {
+      const handler = (_event: unknown, id: string, payload: unknown) => {
+        if (id !== sessionId) return;
+        if (Array.isArray(payload)) {
+          payload.forEach((item) => cb(item));
+        } else {
+          cb(payload);
+        }
+      };
+
+      ipcRenderer.on('sessions:logs:init', handler);
+      ipcRenderer.on('sessions:log', handler);
+      safeInvoke('sessions:subscribeLogs', sessionId);
+
+      return () => {
+        safeInvoke('sessions:unsubscribeLogs', sessionId);
+        ipcRenderer.removeListener('sessions:logs:init', handler);
+        ipcRenderer.removeListener('sessions:log', handler);
+      };
+    },
+  },
+  files: {
+    read: (profileName?: string | null): Promise<unknown> => safeInvoke('files:read', profileName ?? null),
+    save: (profileName: string | null, files: unknown): Promise<unknown> => safeInvoke('files:save', profileName, files),
+  },
+  sessionFiles: {
+    read: (profileName?: string | null): Promise<unknown> => safeInvoke('files:read', profileName ?? null),
+    save: (profileName: string | null, files: unknown): Promise<unknown> => safeInvoke('files:save', profileName, files),
+  },
+  autogen: {
+    run: (sessionId: string): Promise<unknown> => safeInvoke('autogen:run', sessionId),
+    stop: (sessionId: string): Promise<unknown> => safeInvoke('autogen:stop', sessionId),
+  },
+  downloader: {
+    run: (sessionId: string, options?: unknown): Promise<unknown> => safeInvoke('downloader:run', sessionId, options),
+    stop: (sessionId: string): Promise<unknown> => safeInvoke('downloader:stop', sessionId),
+    openDrafts: (sessionKey: string): Promise<unknown> => safeInvoke('downloader:openDrafts', sessionKey),
+    scanDrafts: (sessionKey: string): Promise<unknown> => safeInvoke('downloader:scanDrafts', sessionKey),
+    downloadAll: (sessionKey: string, options?: { limit?: number }): Promise<unknown> =>
+      safeInvoke('downloader:downloadAll', sessionKey, options),
   },
   pipeline: {
     run: (steps: unknown): Promise<unknown> => safeInvoke('pipeline:run', steps),
@@ -38,6 +84,27 @@ contextBridge.exposeInMainWorld('electronAPI', {
       ipcRenderer.on('pipeline:progress', (_event, status) => cb(status));
       return () => ipcRenderer.removeAllListeners('pipeline:progress');
     },
+  },
+  window: {
+    minimize: (): Promise<unknown> => safeInvoke('window:minimize'),
+    maximize: (): Promise<unknown> => safeInvoke('window:maximize'),
+    isWindowMaximized: (): Promise<unknown> => safeInvoke('window:isMaximized'),
+    close: (): Promise<unknown> => safeInvoke('window:close'),
+  },
+  logs: {
+    subscribe: (cb: (entry: unknown) => void) => {
+      const handler = (_event: unknown, entry: unknown) => {
+        cb(entry);
+      };
+      ipcRenderer.on('logging:push', handler);
+      return () => {
+        ipcRenderer.removeListener('logging:push', handler);
+      };
+    },
+    export: (): Promise<unknown> => safeInvoke('system:openLogs'),
+  },
+  qa: {
+    batchRun: (videoDir?: string): Promise<unknown> => safeInvoke('qa:batchRun', videoDir),
   },
   video: {
     extractPreviewFrames: (videoPath: string, count: number): Promise<unknown> =>

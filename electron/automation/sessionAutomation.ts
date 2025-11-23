@@ -2,7 +2,12 @@ import fs from 'fs/promises';
 import path from 'path';
 import type { Browser, ElementHandle, Page } from 'puppeteer-core';
 import type { RunResult } from '../../shared/types';
-import { configureDownloads, launchBrowser, newPage, type SessionRunContext } from './chromeController';
+import { configureDownloads, newPage, type SessionRunContext } from './chromeController';
+import { getOrLaunchChromeForProfile } from '../chrome/manager';
+import { resolveSessionCdpPort } from '../utils/ports';
+import { getActiveChromeProfile, scanChromeProfiles, type ChromeProfile } from '../chrome/profiles';
+
+const delay = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
 
 const PROMPT_INPUT_SELECTOR = "textarea[data-testid='prompt-input']";
 const SUBMIT_BUTTON_SELECTOR = "button[data-testid='submit']";
@@ -50,11 +55,24 @@ const withSessionLock = async (ctx: SessionRunContext, runner: () => Promise<Run
 const closeBrowserSafe = async (browser: Browser | null) => {
   try {
     if (browser) {
+      const meta = browser as any;
+      if (meta.__soraManaged) {
+        return;
+      }
       await browser.close();
     }
   } catch (error) {
     console.error('Failed to close browser', error);
   }
+};
+
+const resolveProfileForContext = async (ctx: SessionRunContext): Promise<ChromeProfile> => {
+  // Prefer the globally active profile; if unavailable, fall back to the first scanned profile.
+  const profiles = await scanChromeProfiles();
+  const active = await getActiveChromeProfile();
+  if (active) return active;
+  if (profiles.length > 0) return profiles[0];
+  throw new Error('No Chrome profile available');
 };
 
 const getOrLaunchBrowser = async (
@@ -66,8 +84,9 @@ const getOrLaunchBrowser = async (
     return { browser: existing, created: false };
   }
 
-  const launched = await launchBrowser(ctx);
-  const browser = launched.browser;
+  const profile = await resolveProfileForContext(ctx);
+  const port = resolveSessionCdpPort({ name: ctx.sessionName, cdpPort: null }, 9222);
+  const browser = await getOrLaunchChromeForProfile(profile, port);
   activeDraftBrowsers.set(ctx.sessionName, browser);
   browser.on('disconnected', () => activeDraftBrowsers.delete(ctx.sessionName));
   return { browser, created: true };
@@ -141,7 +160,7 @@ const findLatestDownloadedFile = async (directory: string): Promise<string | nul
 const waitForDraftAcceptance = async (page: Page, config: SessionRunContext['config']) => {
   await Promise.race([
     page.waitForSelector(`${SUBMIT_BUTTON_SELECTOR}:not([disabled])`, { timeout: config.draftTimeoutMs }).catch(() => null),
-    page.waitForTimeout(config.promptDelayMs)
+    delay(config.promptDelayMs)
   ]);
 };
 
@@ -159,8 +178,8 @@ const runPromptsInternal = async (ctx: SessionRunContext): Promise<RunResult> =>
     const prompts = await readLines(promptsPath);
     const imagePrompts = await readLines(imagePromptsPath);
 
-    const launched = await launchBrowser(ctx);
-    browser = launched.browser;
+    const { browser: managedBrowser } = await getOrLaunchBrowser(ctx);
+    browser = managedBrowser;
     const page = await newPage(browser);
     await configureDownloads(page, ctx.downloadsDir);
     await page.goto('https://sora.chatgpt.com', { waitUntil: 'networkidle2' });
@@ -249,11 +268,19 @@ const waitForDownloadCompletion = async (
     const handler = (event: { state: string }) => {
       if (event.state === 'completed') {
         clearTimeout(timeout);
-        client.removeListener('Page.downloadProgress', handler);
+        if (typeof client.off === 'function') {
+          client.off('Page.downloadProgress', handler as never);
+        } else {
+          client.removeAllListeners('Page.downloadProgress');
+        }
         resolve();
       } else if (event.state === 'canceled') {
         clearTimeout(timeout);
-        client.removeListener('Page.downloadProgress', handler);
+        if (typeof client.off === 'function') {
+          client.off('Page.downloadProgress', handler as never);
+        } else {
+          client.removeAllListeners('Page.downloadProgress');
+        }
         reject(new Error('Download cancelled'));
       }
     };
@@ -318,8 +345,8 @@ export const runDownloads = async (ctx: SessionRunContext, maxVideos: number): P
       const titlesPath = path.join(ctx.sessionPath, 'titles.txt');
       const titles = await readLines(titlesPath);
 
-      const launched = await launchBrowser(ctx);
-      browser = launched.browser;
+      const { browser: managedBrowser } = await getOrLaunchBrowser(ctx);
+      browser = managedBrowser;
       const page = await newPage(browser);
       await configureDownloads(page, ctx.downloadsDir);
       await page.goto(DRAFTS_URL, { waitUntil: 'networkidle2' });
@@ -339,7 +366,7 @@ export const runDownloads = async (ctx: SessionRunContext, maxVideos: number): P
         try {
           lastDownloadedFile = await downloadDraftCard(page, card, title, ctx);
           downloadedCount += 1;
-          await page.waitForTimeout(1000);
+          await delay(1000);
         } catch (error) {
           skippedCount += 1;
           const errorMessage = error instanceof Error ? error.message : 'Unknown error';
