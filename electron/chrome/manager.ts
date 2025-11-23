@@ -4,7 +4,7 @@ import puppeteer, { type Browser } from 'puppeteer-core';
 
 import { getConfig } from '../config/config';
 import { resolveChromeExecutablePath } from './paths';
-import { ChromeProfile } from './profiles';
+import { ChromeProfile, resolveProfileLaunchTarget } from './profiles';
 
 const CDP_HOST = '127.0.0.1';
 
@@ -63,11 +63,11 @@ async function ensureChromeWithCDP(profile: ChromeProfile, port: number): Promis
     return { endpoint, alreadyRunning: true };
   }
 
-  const profileDirectory = profile.profileDirectory ?? profile.profileDir ?? 'Default';
+  const { userDataDir, profileDirectoryArg } = await resolveProfileLaunchTarget(profile);
   const args = [
     `--remote-debugging-port=${port}`,
-    `--user-data-dir=${profile.userDataDir}`,
-    `--profile-directory=${profileDirectory}`,
+    `--user-data-dir=${userDataDir}`,
+    ...(profileDirectoryArg ? [`--profile-directory=${profileDirectoryArg}`] : []),
     '--disable-features=AutomationControlled',
     '--no-first-run',
     '--no-default-browser-check',
@@ -85,8 +85,8 @@ async function ensureChromeWithCDP(profile: ChromeProfile, port: number): Promis
 
   console.info('[chrome] spawned browser for CDP', {
     executablePath,
-    userDataDir: profile.userDataDir,
-    profileDirectory,
+    userDataDir,
+    profileDirectory: profileDirectoryArg,
     cdpPort: port,
   });
 
@@ -121,15 +121,13 @@ export async function getOrLaunchChromeForProfile(profile: ChromeProfile, port: 
   browser.__soraAlreadyRunning = true; // keep windows open between runs
   browser.__soraManaged = true;
 
-  const profileDirectory = profile.profileDirectory ?? profile.profileDir ?? 'Default';
-
   activeInstances.set(key, {
     key,
     browser,
     endpoint,
     port,
     userDataDir: profile.userDataDir,
-    profileDirectory,
+    profileDirectory: profile.profileDirectory ?? profile.profileDir ?? 'Default',
     spawned: !alreadyRunning,
     childPid,
   });
@@ -144,7 +142,7 @@ export async function getOrLaunchChromeForProfile(profile: ChromeProfile, port: 
   console.info('[chrome] connected to CDP', {
     endpoint,
     userDataDir: profile.userDataDir,
-    profileDirectory,
+    profileDirectory: profile.profileDirectory ?? profile.profileDir ?? 'Default',
   });
 
   return browser;

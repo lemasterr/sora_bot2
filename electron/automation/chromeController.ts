@@ -1,7 +1,10 @@
-import puppeteer, { Browser, Page } from 'puppeteer-core';
+import path from 'path';
+import { Browser, Page } from 'puppeteer-core';
 
 import type { Config } from '../../shared/types';
-import { resolveChromeExecutablePath } from '../chrome/paths';
+import { getOrLaunchChromeForProfile } from '../chrome/manager';
+import { type ChromeProfile } from '../chrome/profiles';
+import { resolveSessionCdpPort } from '../utils/ports';
 
 export type SessionRunContext = {
   sessionName: string;
@@ -12,22 +15,21 @@ export type SessionRunContext = {
   cancelled: boolean;
 };
 
-let chromeExecutablePath: string | null = null;
-
-export const setChromeExecutablePath = (executablePath: string) => {
-  chromeExecutablePath = executablePath;
+const deriveProfileFromContext = (ctx: SessionRunContext): ChromeProfile => {
+  const directoryName = path.basename(ctx.profileDir) || 'Default';
+  const baseDir = path.dirname(ctx.profileDir);
+  return {
+    name: directoryName,
+    userDataDir: baseDir,
+    profileDirectory: directoryName,
+    profileDir: directoryName,
+  };
 };
 
 export const launchBrowser = async (ctx: SessionRunContext): Promise<{ browser: Browser }> => {
-  const executablePath = chromeExecutablePath ?? (await resolveChromeExecutablePath());
-
-  const browser = await puppeteer.launch({
-    executablePath,
-    headless: false,
-    userDataDir: ctx.profileDir,
-    args: ['--no-sandbox', '--disable-setuid-sandbox']
-  });
-
+  const profile = deriveProfileFromContext(ctx);
+  const port = resolveSessionCdpPort({ name: ctx.sessionName, cdpPort: null }, 9222);
+  const browser = await getOrLaunchChromeForProfile(profile, port);
   return { browser };
 };
 
