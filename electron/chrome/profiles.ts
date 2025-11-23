@@ -2,11 +2,14 @@ import fs from 'fs/promises';
 import os from 'os';
 import path from 'path';
 import { getConfig, updateConfig } from '../config/config';
+import { logError, logInfo } from '../logging/logger';
 
 export type ChromeProfile = {
   name: string;
   userDataDir: string;
-  profileDir: string;
+  profileDirectory: string;
+  profileDir?: string;
+  isActive?: boolean;
 };
 
 let cachedProfiles: ChromeProfile[] | null = null;
@@ -21,51 +24,96 @@ async function dirExists(candidate: string): Promise<boolean> {
   }
 }
 
-function getBaseCandidatePaths(): string[] {
+export function discoverChromeProfileRoots(): string[] {
   const home = os.homedir();
-  if (process.platform === 'win32') {
-    const localAppData = process.env.LOCALAPPDATA || path.join(home, 'AppData', 'Local');
-    return [path.join(localAppData, 'Google', 'Chrome', 'User Data')];
-  }
+  const candidates: string[] = [];
 
   if (process.platform === 'darwin') {
-    return [path.join(home, 'Library', 'Application Support', 'Google', 'Chrome')];
+    candidates.push(path.join(home, 'Library', 'Application Support', 'Google', 'Chrome'));
+  } else if (process.platform.startsWith('win')) {
+    const envVars = ['LOCALAPPDATA', 'APPDATA', 'USERPROFILE'] as const;
+    for (const envVar of envVars) {
+      const base = process.env[envVar];
+      if (!base) continue;
+      const candidate = path.join(base, 'Google', 'Chrome', 'User Data');
+      if (!candidates.includes(candidate)) {
+        candidates.push(candidate);
+      }
+    }
+  } else {
+    candidates.push(path.join(home, '.config', 'google-chrome'));
+    candidates.push(path.join(home, '.config', 'chromium'));
   }
 
-  // linux and others
-  return [path.join(home, '.config', 'google-chrome')];
+  return candidates;
 }
 
 async function collectProfiles(basePath: string): Promise<ChromeProfile[]> {
   if (!(await dirExists(basePath))) return [];
 
   const entries = await fs.readdir(basePath, { withFileTypes: true });
-  return entries
-    .filter((entry) =>
-      entry.isDirectory() && (entry.name === 'Default' || entry.name.startsWith('Profile '))
-    )
-    .map<ChromeProfile>((entry) => ({
-      name: entry.name,
-      userDataDir: basePath,
-      profileDir: entry.name,
-    }));
-}
-
-export async function scanChromeProfiles(): Promise<ChromeProfile[]> {
-  const bases = getBaseCandidatePaths();
+  const allowedNames = ['Default', 'Guest Profile'];
   const results: ChromeProfile[] = [];
 
-  for (const base of bases) {
-    const profiles = await collectProfiles(base);
-    results.push(...profiles);
+  for (const entry of entries) {
+    if (!entry.isDirectory()) continue;
+    if (!(allowedNames.includes(entry.name) || entry.name.startsWith('Profile '))) continue;
+
+    results.push({
+      name: entry.name,
+      userDataDir: basePath,
+      profileDirectory: entry.name,
+      profileDir: entry.name,
+    });
   }
 
-  cachedProfiles = results;
   return results;
 }
 
+function annotateActive(profiles: ChromeProfile[], activeName?: string | null): ChromeProfile[] {
+  return profiles.map((profile) => ({
+    ...profile,
+    isActive: activeName ? profile.name === activeName : false,
+  }));
+}
+
+export async function scanChromeProfiles(): Promise<ChromeProfile[]> {
+  const config = await getConfig();
+  const bases = discoverChromeProfileRoots();
+  const results: ChromeProfile[] = [];
+
+  for (const base of bases) {
+    try {
+      const expanded = base.replace(/^~(\\|\/)/, `${os.homedir()}$1`);
+      const profiles = await collectProfiles(expanded);
+      logInfo('chromeProfiles', `Found ${profiles.length} Chrome profiles in ${expanded}`);
+      for (const profile of profiles) {
+        const key = `${profile.userDataDir}::${profile.profileDirectory}`;
+        if (!results.find((p) => `${p.userDataDir}::${p.profileDirectory}` === key)) {
+          results.push(profile);
+        }
+      }
+    } catch (error) {
+      logError('chromeProfiles', `Failed to scan ${base}: ${(error as Error).message}`);
+    }
+  }
+
+  cachedProfiles = results;
+  const annotated = annotateActive(results, config.chromeActiveProfileName ?? undefined);
+  logInfo('chromeProfiles', `Total Chrome profiles detected: ${annotated.length}`);
+  return annotated;
+}
+
 export async function setActiveChromeProfile(name: string): Promise<void> {
+  const profiles = cachedProfiles ?? (await scanChromeProfiles());
+  const hasProfile = profiles.some((p) => p.name === name);
+  if (!hasProfile) {
+    throw new Error(`Profile "${name}" not found`);
+  }
+
   await updateConfig({ chromeActiveProfileName: name });
+  cachedProfiles = annotateActive(profiles, name);
+  logInfo('chromeProfiles', `Active Chrome profile set to ${name}`);
 }
 
 export async function getActiveChromeProfile(): Promise<ChromeProfile | null> {
@@ -76,6 +124,15 @@ export async function getActiveChromeProfile(): Promise<ChromeProfile | null> {
 
   const profile = cachedProfiles?.find((p) => p.name === config.chromeActiveProfileName);
   return profile ?? null;
+}
+
+export async function listChromeProfiles(): Promise<ChromeProfile[]> {
+  const config = await getConfig();
+  if (!cachedProfiles) {
+    await scanChromeProfiles();
+  }
+
+  return annotateActive(cachedProfiles ?? [], config.chromeActiveProfileName ?? undefined);
 }
 
 export function applyConfig(): void {

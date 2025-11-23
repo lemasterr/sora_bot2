@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import type { RunResult, SessionInfo } from '../../shared/types';
+import type { ManagedSession, RunResult } from '../../shared/types';
 import { useAppStore } from '../store';
 
 interface StatProps {
@@ -55,7 +55,7 @@ export function DownloaderPage() {
     }
   }, [sessions, selectedSession]);
 
-  const selectedSessionInfo = useMemo<SessionInfo | undefined>(() => {
+  const selectedSessionInfo = useMemo<ManagedSession | undefined>(() => {
     return sessions.find((s) => s.name === selectedSession);
   }, [sessions, selectedSession]);
 
@@ -120,7 +120,7 @@ export function DownloaderPage() {
               <p className="text-lg font-semibold text-white">{selectedSessionInfo?.name ?? 'Select session'}</p>
             </div>
             <span className="rounded-full bg-emerald-500/20 px-3 py-1 text-xs font-semibold text-emerald-300">
-              {selectedSessionInfo ? `${selectedSessionInfo.promptCount} prompts` : 'Idle'}
+              {selectedSessionInfo ? `${selectedSessionInfo.promptCount ?? 0} prompts` : 'Idle'}
             </span>
           </div>
 

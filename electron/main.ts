@@ -1,7 +1,7 @@
 import path from 'path';
 import { app, BrowserWindow, ipcMain, shell } from 'electron';
 import { getConfig, updateConfig } from './config/config';
-import { scanChromeProfiles, setActiveChromeProfile } from './chrome/profiles';
+import { listChromeProfiles, scanChromeProfiles, setActiveChromeProfile } from './chrome/profiles';
 import { getSession, listSessions, saveSession, deleteSession } from './sessions/repo';
 import { runPrompts, cancelPrompts } from './automation/promptsRunner';
 import { runDownloads, cancelDownloads } from './automation/downloader';
@@ -13,6 +13,7 @@ import { loggerEvents, logError } from './logging/logger';
 import { getDailyStats, getTopSessions } from './logging/history';
 import { getLastSelectorForSession, startInspectorForSession } from './automation/selectorInspector';
 import { runCleanupNow, scheduleDailyCleanup } from './maintenance/cleanup';
+import { readProfileFiles, saveProfileFiles } from './content/profileFiles';
 
 let mainWindow: BrowserWindow | null = null;
 
@@ -77,13 +78,29 @@ function handle<T extends any[]>(channel: string, fn: (...args: T) => Promise<an
 handle('config:get', async () => getConfig());
 handle('config:update', async (partial) => updateConfig(partial));
 
-handle('chrome:scanProfiles', async () => scanChromeProfiles());
-handle('chrome:setActiveProfile', async (name: string) => setActiveChromeProfile(name));
+handle('chrome:scanProfiles', async () => {
+  const profiles = await scanChromeProfiles();
+  return { ok: true, profiles };
+});
+handle('chrome:listProfiles', async () => {
+  const profiles = await listChromeProfiles();
+  return { ok: true, profiles };
+});
+handle('chrome:setActiveProfile', async (name: string) => {
+  await setActiveChromeProfile(name);
+  const profiles = await listChromeProfiles();
+  return { ok: true, profiles };
+});
 
 handle('sessions:list', async () => listSessions());
 handle('sessions:get', async (id: string) => getSession(id));
 handle('sessions:save', async (session) => saveSession(session));
 handle('sessions:delete', async (id: string) => deleteSession(id));
+handle('files:read', async (profileName?: string | null) => {
+  const files = await readProfileFiles(profileName);
+  return { ok: true, files };
+});
+handle('files:save', async (profileName: string | null, files) => saveProfileFiles(profileName, files));
 handle('sessions:runPrompts', async (id: string) => {
   const session = await getSession(id);
   if (!session) return { ok: false, error: 'Session not found' };

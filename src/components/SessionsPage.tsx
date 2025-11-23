@@ -12,8 +12,8 @@ const statusColors: Record<NonNullable<ManagedSession['status']>, string> = {
 const emptySession: ManagedSession = {
   id: '',
   name: 'New Session',
-  chromeProfile: undefined,
-  promptProfile: undefined,
+  chromeProfileName: null,
+  promptProfile: null,
   cdpPort: 9222,
   promptsFile: '',
   imagePromptsFile: '',
@@ -55,8 +55,19 @@ export const SessionsPage: React.FC = () => {
   };
 
   const loadProfiles = async () => {
-    const items = await window.electronAPI.chrome.list();
-    setProfiles(items);
+    const chromeApi = window.electronAPI?.chrome;
+    if (!chromeApi) return;
+
+    const result = (await chromeApi.listProfiles?.()) ?? (await chromeApi.scanProfiles?.());
+    if (Array.isArray(result)) {
+      setProfiles(result);
+    } else if (result && typeof result === 'object') {
+      if ('ok' in result && (result as any).ok && Array.isArray((result as any).profiles)) {
+        setProfiles((result as any).profiles as ChromeProfile[]);
+      } else if (Array.isArray((result as any).profiles)) {
+        setProfiles((result as any).profiles as ChromeProfile[]);
+      }
+    }
   };
 
   useEffect(() => {
@@ -85,13 +96,18 @@ export const SessionsPage: React.FC = () => {
   const saveSession = async () => {
     if (!window.electronAPI.sessions) return;
     setSaving(true);
-    const updated = await window.electronAPI.sessions.save(form);
-    setSessions(updated);
-    const current = updated.find((s) => s.id === form.id) || updated[updated.length - 1];
-    if (current) {
-      setSelectedId(current.id);
-      setForm(current);
-    }
+    const saved = await window.electronAPI.sessions.save(form);
+    setSessions((prev) => {
+      const existingIndex = prev.findIndex((s) => s.id === saved.id);
+      if (existingIndex >= 0) {
+        const next = [...prev];
+        next[existingIndex] = saved;
+        return next;
+      }
+      return [...prev, saved];
+    });
+    setSelectedId(saved.id);
+    setForm(saved);
     setSaving(false);
     setActionMessage('Session saved');
   };
@@ -104,18 +120,39 @@ export const SessionsPage: React.FC = () => {
 
   const handleAction = async (action: 'prompts' | 'downloads' | 'stop' | 'open') => {
     if (!form.id || !window.electronAPI.sessions) return;
-    let result: RunResult;
     if (action === 'open') {
       setOpenWindowId(form.id);
       setActionMessage('Session window opened');
       return;
-    } else if (action === 'prompts') {
-      result = await window.electronAPI.sessions.runPrompts(form.id);
-    } else if (action === 'downloads') {
-      result = await window.electronAPI.sessions.runDownloads(form.id);
-    } else {
-      result = await window.electronAPI.sessions.stop(form.id);
     }
+
+    const autogen = window.electronAPI.autogen;
+    const downloader = window.electronAPI.downloader;
+    let result: RunResult | undefined;
+
+    if (action === 'prompts') {
+      result = (await autogen?.run?.(form.id)) as RunResult;
+      if (!result && window.electronAPI.sessions.runPrompts) {
+        result = await window.electronAPI.sessions.runPrompts(form.id);
+      }
+    } else if (action === 'downloads') {
+      result = (await downloader?.run?.(form.id, { limit: form.maxVideos ?? 0 })) as RunResult;
+      if (!result && window.electronAPI.sessions.runDownloads) {
+        result = await window.electronAPI.sessions.runDownloads(form.id, form.maxVideos);
+      }
+    } else {
+      result = (await autogen?.stop?.(form.id)) as RunResult;
+      await downloader?.stop?.(form.id);
+      if (!result && window.electronAPI.sessions.cancelPrompts) {
+        result = await window.electronAPI.sessions.cancelPrompts(form.id);
+      }
+    }
+
+    if (!result) {
+      setActionMessage('No response received');
+      return;
+    }
+
     const message = result.ok ? result.details ?? 'OK' : result.error ?? 'Error';
     setActionMessage(message);
     loadSessions();
@@ -151,7 +188,7 @@ export const SessionsPage: React.FC = () => {
                   {statusDot(session.status || 'idle')}
                   <span className="font-semibold">{session.name}</span>
                 </div>
-                <span className="text-xs text-zinc-400">{session.chromeProfile || 'No profile'}</span>
+                <span className="text-xs text-zinc-400">{session.chromeProfileName || 'No profile'}</span>
               </div>
               <div className="mt-1 text-xs text-zinc-400">{session.promptProfile || 'Prompt profile: default'}</div>
             </button>
@@ -217,13 +254,13 @@ export const SessionsPage: React.FC = () => {
               Chrome Profile
               <select
                 className="mt-1 w-full rounded-lg border border-zinc-700 bg-zinc-950 px-3 py-2 text-sm text-white focus:border-blue-500 focus:outline-none"
-                value={form.chromeProfile ?? ''}
-                onChange={(e) => handleChange('chromeProfile', e.target.value || undefined)}
+                value={form.chromeProfileName ?? ''}
+                onChange={(e) => handleChange('chromeProfileName', e.target.value || null)}
               >
                 <option value="">Select profile</option>
                 {profiles.map((profile) => (
                   <option key={profile.name} value={profile.name}>
-                    {profile.name} ({profile.profileDir})
+                    {profile.name} ({profile.profileDirectory ?? profile.profileDir})
                   </option>
                 ))}
               </select>
