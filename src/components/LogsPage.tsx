@@ -15,13 +15,24 @@ export function LogsPage() {
   const [filters, setFilters] = useState<Set<LogSource>>(new Set(SOURCES));
   const [exportMessage, setExportMessage] = useState<string>('');
   const logRef = useRef<HTMLDivElement>(null);
+  const [apiError, setApiError] = useState<string | null>(null);
 
   useEffect(() => {
-    if (!window.electronAPI.logs) return;
-    const unsubscribe = window.electronAPI.logs.subscribe((entry) => {
+    const loggingApi = (window as any).electronAPI?.logging;
+    if (!loggingApi?.onLog) {
+      setApiError('Logging API is not available. Please run the Sora desktop app.');
+      return;
+    }
+
+    let cancelled = false;
+    loggingApi.onLog((entry: AppLogEntry) => {
+      if (cancelled) return;
       setLogs((prev) => [...prev.slice(-900), entry]);
     });
-    return () => unsubscribe?.();
+
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   useEffect(() => {
@@ -51,12 +62,31 @@ export function LogsPage() {
 
   const exportLogs = async () => {
     setExportMessage('');
-    const result = await window.electronAPI.logs.export();
-    if (result.ok) {
-      setExportMessage(`Exported to ${result.path}`);
-    } else if (result.error !== 'cancelled') {
-      setExportMessage(result.error || 'Export failed');
+    const loggingApi = (window as any).electronAPI?.logging;
+    const systemApi = (window as any).electronAPI?.system;
+    if (loggingApi?.export) {
+      const result = await loggingApi.export();
+      if (result?.ok) {
+        setExportMessage(`Exported to ${result.path}`);
+      } else if (result?.error && result.error !== 'cancelled') {
+        setExportMessage(result.error || 'Export failed');
+      } else {
+        setExportMessage('Export cancelled or unavailable.');
+      }
+      return;
     }
+
+    if (systemApi?.openLogs) {
+      const result = await systemApi.openLogs();
+      if (result?.ok) {
+        setExportMessage('Opening logs folder…');
+      } else if (result?.error && result.error !== 'cancelled') {
+        setExportMessage(result.error || 'Unable to open logs folder');
+      }
+      return;
+    }
+
+    setExportMessage('Logging API is not available in this environment.');
   };
 
   return (
@@ -87,6 +117,9 @@ export function LogsPage() {
         </div>
       </div>
 
+      {apiError && (
+        <div className="rounded-lg border border-amber-700/70 bg-amber-900/30 px-4 py-2 text-sm text-amber-200">{apiError}</div>
+      )}
       {exportMessage && <div className="rounded-lg border border-emerald-700/70 bg-emerald-900/30 px-4 py-2 text-sm text-emerald-200">{exportMessage}</div>}
 
       <div className="flex-1 overflow-hidden rounded-xl border border-zinc-800 bg-black/90">

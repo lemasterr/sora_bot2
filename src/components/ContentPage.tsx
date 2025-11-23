@@ -39,10 +39,16 @@ export const ContentPage: React.FC = () => {
       setLoadingProfiles(true);
       setError(null);
       try {
-        const config = await window.electronAPI.config.get();
-        const profileResult = forceScan
-          ? await window.electronAPI.chrome.scanProfiles()
-          : await window.electronAPI.chrome.listProfiles();
+        const electronApi = (window as any).electronAPI;
+        const chromeApi = electronApi?.chrome;
+        if (!electronApi?.config || !chromeApi) {
+          setError('Chrome API is not available. Please run the Sora desktop app (Electron), not just the Vite dev URL.');
+          setLoadingProfiles(false);
+          return;
+        }
+
+        const config = await electronApi.config.get();
+        const profileResult = forceScan ? await chromeApi.scanProfiles() : await chromeApi.listProfiles();
 
         if (!profileResult?.ok) {
           throw new Error(profileResult?.error || 'Failed to load profiles');
@@ -74,7 +80,13 @@ export const ContentPage: React.FC = () => {
       setError(null);
       setStatus(null);
       try {
-        const response = await (window.electronAPI.sessionFiles?.read ?? window.electronAPI.files.read)(selectedProfile);
+        const sessionFilesApi = (window as any).electronAPI?.sessionFiles ?? (window as any).electronAPI?.files;
+        if (!sessionFilesApi?.read) {
+          setError('Session files API is not available. Please run inside the Electron app.');
+          setLoading(false);
+          return;
+        }
+        const response = await sessionFilesApi.read(selectedProfile);
         if (!response?.ok) {
           throw new Error(response?.error || 'Failed to load files');
         }
@@ -190,7 +202,11 @@ export const ContentPage: React.FC = () => {
                 setScanning(true);
                 setError(null);
                 try {
-                  const result = await window.electronAPI.chrome.scanProfiles();
+                  const chromeApi = (window as any).electronAPI?.chrome;
+                  if (!chromeApi?.scanProfiles) {
+                    throw new Error('Chrome API is not available. Please run the Electron app.');
+                  }
+                  const result = await chromeApi.scanProfiles();
                   if (!result?.ok) throw new Error(result?.error || 'Scan failed');
                   const next = (result.profiles as ChromeProfile[]) ?? [];
                   setProfiles(next);
