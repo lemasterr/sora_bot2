@@ -137,6 +137,96 @@ export interface WatermarkCleanResult {
   error?: string;
 }
 
+export interface ElectronAPI {
+  listDownloadedVideos: () => Promise<DownloadedVideo[]>;
+  config?: { get: () => Promise<Config>; update: (partial: Partial<Config>) => Promise<Config> };
+  chrome?: {
+    scanProfiles: () => Promise<ChromeProfile[]>;
+    listProfiles: () => Promise<ChromeProfile[]>;
+    setActiveProfile: (name: string) => Promise<unknown>;
+    cloneProfile: () => Promise<unknown>;
+  };
+  sessions?: {
+    list: () => Promise<ManagedSession[]>;
+    get?: (id: string) => Promise<ManagedSession | null>;
+    save: (session: ManagedSession) => Promise<ManagedSession>;
+    delete?: (id: string) => Promise<unknown>;
+    command: (sessionId: string, action: SessionCommandAction) => Promise<unknown>;
+    runPrompts?: (id: string) => Promise<unknown>;
+    cancelPrompts?: (id: string) => Promise<unknown>;
+    runDownloads?: (id: string, maxVideos?: number) => Promise<unknown>;
+    cancelDownloads?: (id: string) => Promise<unknown>;
+    subscribeLogs: (sessionId: string, cb: (entry: SessionLogEntry) => void) => () => void;
+  };
+  files?: {
+    read: (profileName?: string | null) => Promise<unknown>;
+    save: (profileName: string | null, files: SessionFiles) => Promise<unknown>;
+  };
+  sessionFiles?: {
+    read: (profileName?: string | null) => Promise<unknown>;
+    save: (profileName: string | null, files: SessionFiles) => Promise<unknown>;
+  };
+  autogen?: {
+    run: (sessionId: string) => Promise<unknown>;
+    stop: (sessionId: string) => Promise<unknown>;
+  };
+  downloader?: {
+    run?: (sessionId: string, options?: unknown) => Promise<unknown>;
+    stop?: (sessionId: string) => Promise<unknown>;
+    openDrafts: (sessionKey: string) => Promise<unknown>;
+    scanDrafts: (sessionKey: string) => Promise<unknown>;
+    downloadAll: (sessionKey: string, options?: { limit?: number }) => Promise<unknown>;
+  };
+  pipeline?: {
+    run: (steps: unknown) => Promise<unknown>;
+    cancel: () => Promise<unknown>;
+    onProgress: (cb: (status: unknown) => void) => () => void;
+  };
+  window?: {
+    minimize: () => Promise<unknown>;
+    maximize: () => Promise<unknown>;
+    isWindowMaximized?: () => Promise<unknown>;
+    close: () => Promise<unknown>;
+  };
+  logs?: {
+    subscribe: (cb: (entry: AppLogEntry) => void) => () => void;
+    export: () => Promise<unknown>;
+  };
+  qa?: { batchRun: (videoDir?: string) => Promise<unknown> };
+  video?: {
+    extractPreviewFrames: (videoPath: string, count: number) => Promise<unknown>;
+    pickSmartPreviewFrames: (videoPath: string, count: number) => Promise<unknown>;
+    blurWithProfile: (input: string, output: string, profileId: string) => Promise<unknown>;
+    blurProfiles: {
+      list: () => Promise<unknown>;
+      save: (profile: unknown) => Promise<unknown>;
+      delete: (id: string) => Promise<unknown>;
+    };
+  };
+  cleanup?: { run: () => Promise<unknown> };
+  telegram?: { test: () => Promise<unknown>; sendMessage: (text: string) => Promise<unknown> };
+  analytics?: { getDailyStats: (days: number) => Promise<unknown>; getTopSessions: (limit: number) => Promise<unknown> };
+  selectorInspector?: { start: (sessionId: string) => Promise<unknown>; getLast: (sessionId: string) => Promise<unknown> };
+  watermark?: {
+    listMasks: () => Promise<WatermarkMask[]>;
+    detect: (videoPath: string, templatePath?: string) => Promise<WatermarkDetectionResult>;
+    saveMask: (mask: WatermarkMask) => Promise<WatermarkMask[]>;
+    clean: (videoPaths: string[], maskId?: string) => Promise<WatermarkCleanResult>;
+  };
+  logging?: {
+    rendererError: (payload: unknown) => Promise<unknown>;
+    onLog: (cb: (entry: AppLogEntry) => void) => void;
+  };
+  system?: { openPath: (target: string) => Promise<unknown>; openLogs: () => Promise<unknown> };
+  ping?: () => Promise<unknown>;
+}
+
+declare global {
+  interface Window {
+    electronAPI: ElectronAPI;
+  }
+}
+
 export type PipelineStepType =
   | 'session_prompts'
   | 'session_images'
