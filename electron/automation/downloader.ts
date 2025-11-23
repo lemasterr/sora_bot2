@@ -247,6 +247,17 @@ async function longSwipeOnce(page: Page): Promise<void> {
   await delay(820);
 }
 
+async function keyNudgeForNextCard(page: Page): Promise<void> {
+  try {
+    await page.keyboard.press('PageDown');
+    await delay(240);
+    await page.keyboard.press('ArrowDown');
+  } catch {
+    // ignore key nudges if focus is missing
+  }
+  await delay(520);
+}
+
 async function scrollToNextCardInFeed(
   page: Page,
   pauseMs = 1800,
@@ -284,9 +295,15 @@ async function scrollToNextCardInFeed(
       }
       return true;
     }
+    await keyNudgeForNextCard(page);
     await delay(Math.floor(pauseMs * 0.9));
   }
 
+  await page.evaluate(() => {
+    window.scrollBy(0, window.innerHeight * 0.95);
+  });
+  await keyNudgeForNextCard(page);
+  await delay(900);
   if (await waitForChange(Math.floor(timeoutMs * 0.9))) {
     try {
       await page.waitForSelector(RIGHT_PANEL_SELECTOR, { timeout: 6500 });
