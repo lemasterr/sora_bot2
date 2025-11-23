@@ -77,6 +77,42 @@ function annotateActive(profiles: ChromeProfile[], activeName?: string | null): 
   }));
 }
 
+/**
+ * Resolve how we launch a Chrome profile for Puppeteer.
+ *
+ * Old behaviour (working in the previous build) pointed Puppeteer directly at the
+ * profile directory (e.g. `${userDataDir}/Profile 1`) as the user-data-dir, which
+ * avoids Chrome treating the default data dir as "unsafe" for remote debugging
+ * and keeps existing Sora auth/session data intact. The newer build switched to
+ * using the base userDataDir + `--profile-directory`, which triggered
+ * `DevTools remote debugging requires a non-default data directory` and spun up
+ * empty profiles for some users. The helper below restores the old launch path
+ * while keeping the newer cached profile discovery intact.
+ */
+export async function resolveProfileLaunchTarget(
+  profile: ChromeProfile
+): Promise<{ userDataDir: string; profileDirectoryArg?: string }> {
+  const profilePath = path.join(profile.userDataDir, profile.profileDirectory);
+
+  try {
+    const stats = await fs.stat(profilePath);
+    if (stats.isDirectory()) {
+      // Use the concrete profile folder as the user data dir to reuse the exact
+      // signed-in Chrome profile (previous behaviour).
+      return { userDataDir: profilePath };
+    }
+  } catch (error) {
+    const code = (error as NodeJS.ErrnoException)?.code;
+    if (code !== 'ENOENT') {
+      logError('chromeProfiles', `Failed to inspect profile dir ${profilePath}: ${(error as Error).message}`);
+    }
+  }
+
+  // Fallback to the base user data dir + profile-directory flag (newer behaviour)
+  // so we preserve auto-scan/caching while still hinting the desired profile.
+  return { userDataDir: profile.userDataDir, profileDirectoryArg: profile.profileDirectory };
+}
+
 export async function scanChromeProfiles(): Promise<ChromeProfile[]> {
   const config = await getConfig();
   const bases = discoverChromeProfileRoots();

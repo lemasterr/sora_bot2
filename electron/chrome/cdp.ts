@@ -2,7 +2,7 @@ import puppeteer, { type Browser } from 'puppeteer-core';
 
 import { getConfig } from '../config/config';
 import { resolveChromeExecutablePath } from './paths';
-import { ChromeProfile } from './profiles';
+import { ChromeProfile, resolveProfileLaunchTarget } from './profiles';
 
 export async function launchBrowserForSession(
   profile: ChromeProfile,
@@ -17,15 +17,34 @@ export async function launchBrowserForSession(
     throw error;
   });
 
-  return puppeteer.launch({
+  const { userDataDir, profileDirectoryArg } = await resolveProfileLaunchTarget(profile);
+  const args = [
+    `--remote-debugging-port=${cdpPort}`,
+    '--no-sandbox',
+    '--disable-setuid-sandbox',
+  ];
+
+  if (profileDirectoryArg) {
+    // Preserve the newer hinting approach when we fall back to the base userDataDir.
+    args.unshift(`--profile-directory=${profileDirectoryArg}`);
+  }
+
+  const browser = await puppeteer.launch({
     executablePath,
     headless: false,
-    userDataDir: profile.userDataDir,
-    args: [
-      `--profile-directory=${profile.profileDirectory ?? profile.profileDir ?? ''}`,
-      `--remote-debugging-port=${cdpPort}`,
-      '--no-sandbox',
-      '--disable-setuid-sandbox',
-    ],
+    // Use the profile folder itself when available to mirror the previous behaviour that
+    // retained Sora auth, but still honour the cached discovery data.
+    userDataDir,
+    args,
   });
+
+  // Log the actual launch target for diagnostics (helps compare with the prior build).
+  console.info('[chrome] launch', {
+    executablePath,
+    userDataDir,
+    profileDirectory: profileDirectoryArg ?? profile.profileDirectory,
+    cdpPort,
+  });
+
+  return browser;
 }
