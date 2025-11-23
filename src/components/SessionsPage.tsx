@@ -118,7 +118,7 @@ export const SessionsPage: React.FC = () => {
     setActionMessage('');
   };
 
-  const handleAction = async (action: 'prompts' | 'downloads' | 'stop' | 'open') => {
+  const handleAction = async (action: 'prompts' | 'downloads' | 'stop' | 'open' | 'startChrome') => {
     if (!form.id || !window.electronAPI.sessions) return;
     if (action === 'open') {
       setOpenWindowId(form.id);
@@ -139,6 +139,10 @@ export const SessionsPage: React.FC = () => {
       result = (await downloader?.run?.(form.id, { limit: form.maxVideos ?? 0 })) as RunResult;
       if (!result && window.electronAPI.sessions.runDownloads) {
         result = await window.electronAPI.sessions.runDownloads(form.id, form.maxVideos);
+      }
+    } else if (action === 'startChrome') {
+      if (window.electronAPI.sessions.command) {
+        result = (await window.electronAPI.sessions.command(form.id, 'startChrome')) as RunResult;
       }
     } else {
       result = (await autogen?.stop?.(form.id)) as RunResult;
@@ -234,6 +238,13 @@ export const SessionsPage: React.FC = () => {
               className="rounded-lg border border-zinc-700 px-3 py-2 text-sm font-medium text-zinc-200 hover:border-blue-500 hover:text-blue-200 disabled:cursor-not-allowed disabled:opacity-50"
             >
               Open Session Window
+            </button>
+            <button
+              onClick={() => handleAction('startChrome')}
+              disabled={!form.id}
+              className="rounded-lg border border-sky-700 bg-sky-900/60 px-3 py-2 text-sm font-medium text-sky-100 shadow hover:border-sky-500 hover:bg-sky-800 disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              Launch Chrome (CDP port {form.cdpPort ?? 9222})
             </button>
             <button
               onClick={() => handleAction('prompts')}

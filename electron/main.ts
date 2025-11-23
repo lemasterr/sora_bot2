@@ -66,6 +66,30 @@ async function resolveSessionProfile(session: Session) {
   return getActiveChromeProfile();
 }
 
+async function findSessionByKey(key: string): Promise<Session | null> {
+  const direct = await getSession(key);
+  if (direct) return direct as Session;
+  const all = await listSessions();
+  return (all.find((s) => s.name === key) as Session | undefined) ?? null;
+}
+
+async function getOrLaunchManualBrowser(session: Session): Promise<Browser> {
+  const existing = manualBrowsers.get(session.id);
+  if (existing && existing.isConnected()) {
+    return existing;
+  }
+
+  const profile = await resolveSessionProfile(session);
+  if (!profile) {
+    throw new Error('No Chrome profile available');
+  }
+
+  const safePort = session.cdpPort && Number.isFinite(session.cdpPort) ? Number(session.cdpPort) : 9222;
+  const browser = await launchBrowserForSession(profile, safePort);
+  manualBrowsers.set(session.id, browser);
+  return browser;
+}
+
 console.log('[main] starting, NODE_ENV=', process.env.NODE_ENV);
 
 app.whenReady()
@@ -229,6 +253,56 @@ handle('sessions:runDownloads', async (id: string, maxVideos?: number) => {
   return runDownloads(session as any, maxVideos ?? 0);
 });
 handle('sessions:cancelDownloads', async (id: string) => cancelDownloads(id));
+
+handle('downloader:run', async (sessionId: string, options?: { limit?: number }) => {
+  const session = await getSession(sessionId);
+  if (!session) return { ok: false, error: 'Session not found' };
+  const limit = options?.limit ?? session.maxVideos ?? 0;
+  return runDownloads(session as Session, limit ?? 0);
+});
+
+handle('downloader:stop', async (sessionId: string) => {
+  cancelDownloads(sessionId);
+  return { ok: true };
+});
+
+handle('downloader:openDrafts', async (sessionKey: string) => {
+  const session = await findSessionByKey(sessionKey);
+  if (!session) return { ok: false, error: 'Session not found' };
+
+  try {
+    const browser = await getOrLaunchManualBrowser(session as Session);
+    const page = await browser.newPage();
+    await page.goto('https://sora.chatgpt.com/drafts', { waitUntil: 'networkidle2' });
+    return { ok: true, details: 'Drafts page opened' };
+  } catch (error) {
+    const message = (error as Error).message || 'Failed to open drafts';
+    return { ok: false, error: message };
+  }
+});
+
+handle('downloader:scanDrafts', async (sessionKey: string) => {
+  const session = await findSessionByKey(sessionKey);
+  if (!session) return { ok: false, error: 'Session not found' };
+
+  try {
+    const browser = await getOrLaunchManualBrowser(session as Session);
+    const page = await browser.newPage();
+    await page.goto('https://sora.chatgpt.com/drafts', { waitUntil: 'networkidle2' });
+    const cards = await page.$$('.sora-draft-card');
+    return { ok: true, draftsFound: cards.length };
+  } catch (error) {
+    const message = (error as Error).message || 'Failed to scan drafts';
+    return { ok: false, error: message };
+  }
+});
+
+handle('downloader:downloadAll', async (sessionKey: string, options?: { limit?: number }) => {
+  const session = await findSessionByKey(sessionKey);
+  if (!session) return { ok: false, error: 'Session not found' };
+  const limit = options?.limit ?? session.maxVideos ?? 0;
+  return runDownloads(session as Session, limit ?? 0);
+});
 
 handle('pipeline:run', async (steps) => {
   const safeSteps = Array.isArray(steps)

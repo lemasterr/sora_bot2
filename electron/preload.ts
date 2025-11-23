@@ -69,6 +69,10 @@ contextBridge.exposeInMainWorld('electronAPI', {
   downloader: {
     run: (sessionId: string, options?: unknown): Promise<unknown> => safeInvoke('downloader:run', sessionId, options),
     stop: (sessionId: string): Promise<unknown> => safeInvoke('downloader:stop', sessionId),
+    openDrafts: (sessionKey: string): Promise<unknown> => safeInvoke('downloader:openDrafts', sessionKey),
+    scanDrafts: (sessionKey: string): Promise<unknown> => safeInvoke('downloader:scanDrafts', sessionKey),
+    downloadAll: (sessionKey: string, options?: { limit?: number }): Promise<unknown> =>
+      safeInvoke('downloader:downloadAll', sessionKey, options),
   },
   pipeline: {
     run: (steps: unknown): Promise<unknown> => safeInvoke('pipeline:run', steps),
