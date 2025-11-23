@@ -102,7 +102,7 @@ export async function runPrompts(session: Session): Promise<PromptsRunResult> {
     const profile = await resolveChromeProfileForSession({ chromeProfileName: session.chromeProfileName });
 
     if (!profile) {
-      return { ok: false, submitted, failed, error: 'No Chrome profile available' };
+      return { ok: false, submitted, failed, error: 'No Chrome profile available. Select a Chrome profile in Settings.' };
     }
 
     const cdpPort = resolveSessionCdpPort(session, config.cdpPort ?? DEFAULT_CDP_PORT);

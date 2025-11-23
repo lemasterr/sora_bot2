@@ -80,7 +80,7 @@ async function getOrLaunchManualBrowser(session: Session): Promise<Browser> {
 
   const profile = await resolveChromeProfileForSession({ chromeProfileName: session.chromeProfileName });
   if (!profile) {
-    throw new Error('No Chrome profile available');
+    throw new Error('No Chrome profile available. Select a Chrome profile in Settings.');
   }
 
   const config = await getConfig();
@@ -182,7 +182,7 @@ handle('sessions:command', async (sessionId: string, action: SessionCommandActio
   try {
     if (action === 'startChrome') {
       const profile = await resolveChromeProfileForSession({ chromeProfileName: session.chromeProfileName });
-      if (!profile) throw new Error('No Chrome profile available');
+      if (!profile) throw new Error('No Chrome profile available. Select a Chrome profile in Settings.');
       const existing = manualBrowsers.get(session.id);
       if (existing) {
         try {

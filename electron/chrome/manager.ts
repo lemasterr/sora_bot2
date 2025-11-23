@@ -1,5 +1,7 @@
 import { spawn } from 'child_process';
+import fs from 'fs';
 import http from 'http';
+import path from 'path';
 import puppeteer, { type Browser } from 'puppeteer-core';
 
 import { getConfig } from '../config/config';
@@ -92,6 +94,17 @@ async function ensureChromeWithCDP(profile: ChromeProfile, port: number): Promis
   }
 
   const { userDataDir, profileDirectoryArg } = await resolveProfileLaunchTarget(profile);
+
+  if (!fs.existsSync(userDataDir)) {
+    throw new Error(`Chrome profile directory not found at ${userDataDir}. Please re-select the profile in Settings.`);
+  }
+
+  if (profileDirectoryArg) {
+    const profileDirPath = path.join(userDataDir, profileDirectoryArg);
+    if (!fs.existsSync(profileDirPath)) {
+      throw new Error(`Chrome profile "${profileDirectoryArg}" is missing under ${userDataDir}. Choose another profile.`);
+    }
+  }
   const args = [
     `--remote-debugging-port=${port}`,
     `--user-data-dir=${userDataDir}`,

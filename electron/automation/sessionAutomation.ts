@@ -91,7 +91,7 @@ const resolveProfileForContext = async (ctx: SessionRunContext): Promise<ChromeP
 
   const profile = await resolveChromeProfileForSession({ chromeProfileName: ctx.config.chromeActiveProfileName });
   if (profile) return profile;
-  throw new Error('No Chrome profile available');
+  throw new Error('No Chrome profile available. Select a Chrome profile in Settings.');
 };
 
 const getOrLaunchBrowser = async (
