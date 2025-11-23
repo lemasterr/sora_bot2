@@ -9,6 +9,7 @@ export type Config = {
   chromeExecutablePath: string | null;
   chromeUserDataDir: string | null;
   chromeActiveProfileName: string | null;
+  chromeClonedProfilesRoot?: string | null;
   promptDelayMs: number;
   draftTimeoutMs: number;
   downloadTimeoutMs: number;
@@ -39,11 +40,13 @@ const CONFIG_FILE = 'config.json';
 let cachedConfig: Config | null = null;
 
 function defaultConfig(): Config {
+  const defaultSessionsRoot = path.join(getUserDataPath(), 'sessions');
   return {
-    sessionsRoot: path.join(getUserDataPath(), 'sessions'),
+    sessionsRoot: defaultSessionsRoot,
     chromeExecutablePath: null,
     chromeUserDataDir: null,
     chromeActiveProfileName: null,
+    chromeClonedProfilesRoot: path.join(defaultSessionsRoot, 'chrome-clones'),
     promptDelayMs: 2000,
     draftTimeoutMs: 60_000,
     downloadTimeoutMs: 300_000,

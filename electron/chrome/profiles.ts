@@ -3,6 +3,7 @@ import os from 'os';
 import path from 'path';
 import { getConfig, updateConfig } from '../config/config';
 import { logError, logInfo } from '../logging/logger';
+import { ensureDir } from '../utils/fs';
 
 export type ChromeProfile = {
   name: string;
@@ -13,6 +14,11 @@ export type ChromeProfile = {
 };
 
 let cachedProfiles: ChromeProfile[] | null = null;
+
+function slugifyProfileName(name: string): string {
+  const normalized = name.trim().toLowerCase().replace(/\s+/g, '-').replace(/[^a-z0-9-_]/gi, '');
+  return normalized.length > 0 ? normalized : 'profile';
+}
 
 async function dirExists(candidate: string): Promise<boolean> {
   try {
@@ -70,11 +76,19 @@ async function collectProfiles(basePath: string): Promise<ChromeProfile[]> {
   return results;
 }
 
-function annotateActive(profiles: ChromeProfile[], activeName?: string | null): ChromeProfile[] {
-  return profiles.map((profile) => ({
-    ...profile,
-    isActive: activeName ? profile.name === activeName : false,
-  }));
+function annotateActive(
+  profiles: ChromeProfile[],
+  activeName?: string | null,
+  activeUserDataDir?: string | null
+): ChromeProfile[] {
+  return profiles.map((profile) => {
+    const matchesName = activeName ? profile.name === activeName : false;
+    const matchesDir = activeUserDataDir ? profile.userDataDir === activeUserDataDir : true;
+    return {
+      ...profile,
+      isActive: matchesName && matchesDir,
+    };
+  });
 }
 
 /**
@@ -146,7 +160,11 @@ export async function scanChromeProfiles(): Promise<ChromeProfile[]> {
     }
   }
 
-  const annotated = annotateActive(results, config.chromeActiveProfileName ?? undefined);
+  const annotated = annotateActive(
+    results,
+    config.chromeActiveProfileName ?? undefined,
+    config.chromeUserDataDir ?? undefined
+  );
   cachedProfiles = annotated;
   logInfo('chromeProfiles', `Total Chrome profiles detected: ${annotated.length}`);
   return annotated;
@@ -159,8 +177,8 @@ export async function setActiveChromeProfile(name: string): Promise<void> {
     throw new Error(`Profile "${name}" not found`);
   }
 
-  await updateConfig({ chromeActiveProfileName: name });
-  cachedProfiles = annotateActive(profiles, name);
+  const config = await updateConfig({ chromeActiveProfileName: name });
+  cachedProfiles = annotateActive(profiles, name, config.chromeUserDataDir ?? undefined);
   logInfo('chromeProfiles', `Active Chrome profile set to ${name}`);
 }
 
@@ -174,13 +192,72 @@ export async function getActiveChromeProfile(): Promise<ChromeProfile | null> {
   return profile ?? null;
 }
 
+export async function cloneActiveChromeProfile(): Promise<{ ok: boolean; profile?: ChromeProfile; message?: string; error?: string }> {
+  try {
+    const config = await getConfig();
+    const profiles = cachedProfiles ?? (await scanChromeProfiles());
+    const active = profiles.find((p) => p.isActive) ?? profiles.find((p) => p.name === config.chromeActiveProfileName);
+    if (!active) {
+      throw new Error('Active Chrome profile not found. Please select a profile before cloning.');
+    }
+
+    const cloneRoot = config.chromeClonedProfilesRoot || path.join(config.sessionsRoot, 'chrome-clones');
+    await ensureDir(cloneRoot);
+
+    const slug = slugifyProfileName(`${active.profileDirectory || active.name}-sora-clone`);
+    const targetUserDataDir = path.join(cloneRoot, slug);
+    const sourceUserDataDir = active.userDataDir;
+
+    if (sourceUserDataDir === targetUserDataDir) {
+      // Already pointing at a cloned directory; just refresh cache.
+      const refreshedConfig = await updateConfig({
+        chromeUserDataDir: targetUserDataDir,
+        chromeActiveProfileName: active.name,
+        chromeClonedProfilesRoot: cloneRoot,
+      });
+      const refreshed = await scanChromeProfiles();
+      const profile = refreshed.find((p) => p.userDataDir === targetUserDataDir && p.name === refreshedConfig.chromeActiveProfileName);
+      return { ok: true, profile: profile ?? active, message: 'Using existing cloned profile' };
+    }
+
+    const targetExists = await dirExists(targetUserDataDir);
+    if (!targetExists) {
+      logInfo('chromeProfiles', `Cloning Chrome profile from ${sourceUserDataDir} to ${targetUserDataDir}`);
+      await fs.cp(sourceUserDataDir, targetUserDataDir, { recursive: true });
+    } else {
+      logInfo('chromeProfiles', `Reusing existing cloned profile at ${targetUserDataDir}`);
+    }
+
+    const updatedConfig = await updateConfig({
+      chromeUserDataDir: targetUserDataDir,
+      chromeActiveProfileName: active.profileDirectory,
+      chromeClonedProfilesRoot: cloneRoot,
+    });
+
+    const refreshed = await scanChromeProfiles();
+    const profile = refreshed.find(
+      (p) => p.userDataDir === targetUserDataDir && p.profileDirectory === updatedConfig.chromeActiveProfileName
+    );
+
+    return { ok: true, profile: profile ?? active, message: targetExists ? 'Cloned profile reused' : 'Profile cloned for Sora' };
+  } catch (error) {
+    const message = (error as Error)?.message ?? 'Failed to clone Chrome profile';
+    logError('chromeProfiles', message);
+    return { ok: false, error: message };
+  }
+}
+
 export async function listChromeProfiles(): Promise<ChromeProfile[]> {
   const config = await getConfig();
   if (!cachedProfiles) {
     await scanChromeProfiles();
   }
 
-  return annotateActive(cachedProfiles ?? [], config.chromeActiveProfileName ?? undefined);
+  return annotateActive(
+    cachedProfiles ?? [],
+    config.chromeActiveProfileName ?? undefined,
+    config.chromeUserDataDir ?? undefined
+  );
 }
 
 export function applyConfig(): void {

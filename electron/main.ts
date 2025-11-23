@@ -1,7 +1,13 @@
 import path from 'path';
 import { app, BrowserWindow, ipcMain, shell } from 'electron';
 import { getConfig, updateConfig } from './config/config';
-import { listChromeProfiles, scanChromeProfiles, setActiveChromeProfile, getActiveChromeProfile } from './chrome/profiles';
+import {
+  listChromeProfiles,
+  scanChromeProfiles,
+  setActiveChromeProfile,
+  getActiveChromeProfile,
+  cloneActiveChromeProfile,
+} from './chrome/profiles';
 import { getSession, listSessions, saveSession, deleteSession } from './sessions/repo';
 import { runPrompts, cancelPrompts } from './automation/promptsRunner';
 import { runDownloads, cancelDownloads } from './automation/downloader';
@@ -155,6 +161,7 @@ handle('chrome:setActiveProfile', async (name: string) => {
   const profiles = await listChromeProfiles();
   return { ok: true, profiles };
 });
+handle('chrome:cloneProfile', async () => cloneActiveChromeProfile());
 
 ipcMain.handle('sessions:subscribeLogs', (event, sessionId: string) => {
   sessionLogBroker.subscribe(sessionId, event.sender);

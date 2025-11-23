@@ -7,6 +7,7 @@ const DEFAULT_CONFIG: Config = {
   chromeExecutablePath: null,
   chromeUserDataDir: null,
   chromeActiveProfileName: null,
+  chromeClonedProfilesRoot: null,
   promptDelayMs: 1500,
   draftTimeoutMs: 30000,
   downloadTimeoutMs: 60000,
@@ -42,6 +43,7 @@ export const SettingsPage: React.FC = () => {
   const [editingProfile, setEditingProfile] = useState<ChromeProfile | null>(null);
   const [scanError, setScanError] = useState('');
   const [scanning, setScanning] = useState(false);
+  const [cloneStatus, setCloneStatus] = useState('');
 
   useEffect(() => {
     const normalized = config
@@ -195,6 +197,33 @@ export const SettingsPage: React.FC = () => {
     }
   };
 
+  const cloneProfileForSora = async () => {
+    setCloneStatus('');
+    setStatus('');
+    const api = (window as any).electronAPI;
+    const chromeApi = api?.chrome;
+    if (!chromeApi?.cloneProfile) {
+      setCloneStatus(
+        'Chrome clone API is not available. Please run the Sora desktop app (Electron), not just open the Vite dev URL.'
+      );
+      return;
+    }
+
+    try {
+      setCloneStatus('Cloning profile…');
+      const result: any = await chromeApi.cloneProfile();
+      if (result?.ok === false) {
+        setCloneStatus(result.error || 'Failed to clone profile');
+      } else {
+        setCloneStatus(result?.message || 'Profile cloned for Sora');
+        await loadProfiles();
+        await refreshConfig();
+      }
+    } catch (error) {
+      setCloneStatus((error as Error).message);
+    }
+  };
+
   const setActiveProfile = async (name: string) => {
     const api = (window as any).electronAPI;
     const chromeApi = api?.chrome;
@@ -331,6 +360,33 @@ export const SettingsPage: React.FC = () => {
                 </option>
               ))}
             </select>
+          </div>
+          <div className="space-y-2 rounded-lg border border-blue-500/30 bg-blue-500/5 p-3 text-xs text-blue-100">
+            <div className="font-semibold text-blue-100">Clone Chrome profile for Sora</div>
+            <p className="text-[11px] text-blue-200">
+              We will copy your selected system Chrome profile into an isolated clone so Puppeteer can reuse your Sora login without
+              locking the system profile.
+            </p>
+            <div className="mt-2 grid grid-cols-1 gap-1 text-[11px] text-blue-100/90">
+              <div>
+                Active profile: <span className="font-semibold text-white">{draft.chromeActiveProfileName || 'Not set'}</span>
+              </div>
+              <div>
+                Automation user-data-dir: <span className="break-all text-white">{draft.chromeUserDataDir || 'System default'}</span>
+              </div>
+              <div>
+                Clone root: <span className="break-all text-white">{draft.chromeClonedProfilesRoot || 'sessionsRoot/chrome-clones'}</span>
+              </div>
+            </div>
+            <div className="mt-2 flex flex-wrap items-center gap-2">
+              <button
+                onClick={cloneProfileForSora}
+                className="rounded-lg bg-blue-600 px-3 py-2 text-xs font-semibold text-white shadow hover:bg-blue-500"
+              >
+                Clone current system profile for Sora
+              </button>
+              {cloneStatus && <span className="text-[11px] text-blue-200">{cloneStatus}</span>}
+            </div>
           </div>
         </div>
 
