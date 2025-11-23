@@ -3,7 +3,7 @@ import path from 'path';
 import type { Browser, Page } from 'puppeteer-core';
 
 import { launchBrowserForSession } from '../chrome/cdp';
-import { getActiveChromeProfile, scanChromeProfiles, type ChromeProfile } from '../chrome/profiles';
+import { resolveChromeProfileForSession } from '../chrome/profiles';
 import { getConfig, type Config } from '../config/config';
 import { getSessionPaths } from '../sessions/repo';
 import type { Session } from '../sessions/types';
@@ -58,20 +58,19 @@ function safeFileName(title: string): string {
   return sanitized.length > 80 ? sanitized.slice(0, 80) : sanitized;
 }
 
-async function resolveProfile(session: Session): Promise<ChromeProfile | null> {
-  const [profiles, config] = await Promise.all([scanChromeProfiles(), getConfig()]);
-  if (session.chromeProfileName) {
-    const preferred = profiles.find(
-      (p) =>
-        p.name === session.chromeProfileName &&
-        (config.chromeUserDataDir ? p.userDataDir === config.chromeUserDataDir : true)
-    );
-    if (preferred) return preferred;
+async function disconnectIfExternal(browser: Browser | null): Promise<void> {
+  if (!browser) return;
 
-    const match = profiles.find((p) => p.name === session.chromeProfileName);
-    if (match) return match;
+  const meta = browser as any;
+  if (meta.__soraManaged) {
+    return;
   }
-  return getActiveChromeProfile();
+
+  try {
+    await browser.disconnect();
+  } catch {
+    // ignore disconnect errors
+  }
 }
 
 async function configureDownloads(page: Page, downloadsDir: string): Promise<void> {
@@ -153,13 +152,13 @@ export async function runDownloads(session: Session, maxVideos = 0): Promise<Dow
   try {
     const [loadedConfig, paths] = await Promise.all([getConfig(), getSessionPaths(session)]);
     config = loadedConfig;
-    const profile = await resolveProfile(session);
+    const profile = await resolveChromeProfileForSession({ chromeProfileName: session.chromeProfileName });
 
     if (!profile) {
-      return { ok: false, downloaded, error: 'No Chrome profile available' };
+      return { ok: false, downloaded, error: 'No Chrome profile available. Select a Chrome profile in Settings.' };
     }
 
-    const cdpPort = resolveSessionCdpPort(session, (config as Partial<{ cdpPort: number }>).cdpPort ?? DEFAULT_CDP_PORT);
+    const cdpPort = resolveSessionCdpPort(session, config.cdpPort ?? DEFAULT_CDP_PORT);
     browser = await launchBrowserForSession(profile, cdpPort);
 
     const prepare = async () => {
@@ -269,17 +268,7 @@ export async function runDownloads(session: Session, maxVideos = 0): Promise<Dow
     stopWatchdog(runId);
     cancellationMap.delete(session.id);
     unregisterSessionPage(session.id, page);
-    if (browser) {
-      const meta = browser as any;
-      const wasExisting = meta.__soraAlreadyRunning === true || meta.__soraManaged === true;
-      if (!wasExisting) {
-        try {
-          await browser.close();
-        } catch {
-          // ignore
-        }
-      }
-    }
+    await disconnectIfExternal(browser);
   }
 }
 

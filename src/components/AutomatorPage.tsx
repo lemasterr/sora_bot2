@@ -32,7 +32,15 @@ export const AutomatorPage: React.FC = () => {
   const [status, setStatus] = useState<'idle' | 'running' | 'success' | 'error'>('idle');
   const [warning, setWarning] = useState<string>('');
 
-  const sessionOptions = useMemo(() => sessions.map((s) => ({ id: s.id, name: s.name })), [sessions]);
+  const sessionOptions = useMemo(
+    () =>
+      sessions.map((s) => ({
+        id: s.id,
+        name: s.name,
+        profileLabel: s.chromeProfileName ? `Chrome: ${s.chromeProfileName}` : 'Chrome: not set',
+      })),
+    [sessions]
+  );
   const sessionNameById = useMemo(() => Object.fromEntries(sessionOptions.map((s) => [s.id, s.name])), [sessionOptions]);
   const statusColor =
     status === 'running' ? 'bg-blue-500' : status === 'success' ? 'bg-emerald-500' : status === 'error' ? 'bg-red-500' : 'bg-zinc-700';
@@ -62,9 +70,19 @@ export const AutomatorPage: React.FC = () => {
 
   const removeStep = (id: string) => setSteps((prev) => prev.filter((step) => step.id !== id));
 
-  const handleSessionsChange = (id: string, options: HTMLOptionElement[]) => {
-    const selectedSessions = options.filter((opt) => opt.selected).map((opt) => opt.value);
-    updateStep(id, { sessionIds: selectedSessions });
+  const toggleSession = (id: string, sessionId: string) => {
+    setSteps((prev) =>
+      prev.map((step) => {
+        if (step.id !== id) return step;
+        const next = new Set(step.sessionIds ?? []);
+        if (next.has(sessionId)) {
+          next.delete(sessionId);
+        } else {
+          next.add(sessionId);
+        }
+        return { ...step, sessionIds: Array.from(next) };
+      })
+    );
   };
 
   const startPipeline = async () => {
@@ -149,20 +167,46 @@ export const AutomatorPage: React.FC = () => {
 
               <div className="mt-4 grid gap-4 md:grid-cols-2">
                 <div className="space-y-2">
-                  <label className="text-xs uppercase tracking-wide text-zinc-400">Sessions</label>
-                  <select
-                    multiple
-                    value={step.sessionIds}
-                    onChange={(e) => handleSessionsChange(step.id, Array.from(e.target.options))}
-                    className="h-28 w-full rounded-md border border-zinc-700 bg-zinc-800 px-3 py-2 text-sm text-zinc-100 focus:border-blue-500 focus:outline-none"
-                  >
-                    {sessionOptions.map((session) => (
-                      <option key={session.id} value={session.id}>
-                        {session.name}
-                      </option>
-                    ))}
-                  </select>
-                  <p className="text-xs text-zinc-500">Select one or more sessions for this step.</p>
+                  <div className="flex items-center justify-between text-xs uppercase tracking-wide text-zinc-400">
+                    <span>Sessions</span>
+                    <span className="text-[11px] text-zinc-500">
+                      {(step.sessionIds?.length ?? 0) > 0
+                        ? `${step.sessionIds?.length ?? 0} selected`
+                        : 'None selected'}
+                    </span>
+                  </div>
+
+                  <div className="space-y-2 rounded-lg border border-zinc-700 bg-zinc-800/60 p-2">
+                    {sessionOptions.length === 0 && (
+                      <div className="text-sm text-zinc-400">No sessions available.</div>
+                    )}
+
+                    {sessionOptions.map((session) => {
+                      const checked = step.sessionIds?.includes(session.id);
+                      return (
+                        <label
+                          key={session.id}
+                          className={`flex items-center justify-between gap-3 rounded-md border px-3 py-2 text-left transition ${
+                            checked
+                              ? 'border-emerald-500/60 bg-emerald-500/5 text-white'
+                              : 'border-zinc-700 bg-zinc-900/30 text-zinc-200 hover:border-blue-500'
+                          }`}
+                        >
+                          <div className="space-y-0.5">
+                            <div className="text-sm font-semibold">{session.name}</div>
+                            <div className="text-xs text-zinc-400">{session.profileLabel}</div>
+                          </div>
+                          <input
+                            type="checkbox"
+                            checked={checked}
+                            onChange={() => toggleSession(step.id, session.id)}
+                            className="h-4 w-4 accent-emerald-500"
+                          />
+                        </label>
+                      );
+                    })}
+                  </div>
+                  <p className="text-xs text-zinc-500">Toggle the sessions that should run for this step.</p>
                 </div>
 
                 <div className="grid gap-3 md:grid-cols-2">

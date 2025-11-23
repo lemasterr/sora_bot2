@@ -118,6 +118,21 @@ export const SessionsPage: React.FC = () => {
     setActionMessage('');
   };
 
+  const deleteSession = async () => {
+    if (!form.id || !window.electronAPI?.sessions?.delete) return;
+    const confirmed = window.confirm(`Delete session "${form.name}"? This cannot be undone.`);
+    if (!confirmed) return;
+
+    await window.electronAPI.sessions.delete(form.id);
+    const nextSessions = sessions.filter((s) => s.id !== form.id);
+    setSessions(nextSessions);
+
+    const nextSelection = nextSessions[0] ?? { ...emptySession, name: 'New Session' };
+    setSelectedId(nextSessions[0]?.id ?? '');
+    setForm(nextSelection);
+    setActionMessage('Session deleted');
+  };
+
   const handleAction = async (action: 'prompts' | 'downloads' | 'stop' | 'open' | 'startChrome') => {
     if (!form.id || !window.electronAPI.sessions) return;
     if (action === 'open') {
@@ -500,13 +515,22 @@ export const SessionsPage: React.FC = () => {
 
         <div className="mt-4 flex items-center justify-between">
           <div className="text-sm text-zinc-400">{actionMessage}</div>
-          <button
-            onClick={saveSession}
-            disabled={saving}
-            className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white shadow hover:bg-blue-500 disabled:cursor-not-allowed disabled:opacity-60"
-          >
-            {saving ? 'Saving...' : 'Save Session'}
-          </button>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={deleteSession}
+              disabled={!form.id}
+              className="rounded-lg border border-red-700 px-4 py-2 text-sm font-medium text-red-200 shadow hover:bg-red-900/40 disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              Delete Session
+            </button>
+            <button
+              onClick={saveSession}
+              disabled={saving}
+              className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white shadow hover:bg-blue-500 disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              {saving ? 'Saving...' : 'Save Session'}
+            </button>
+          </div>
         </div>
       </div>
       {openSession && <SessionWindow session={openSession} onClose={() => setOpenWindowId(null)} />}
