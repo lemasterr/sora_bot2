@@ -44,8 +44,8 @@ async function rotateIfNeeded(filePath: string): Promise<void> {
 
 export async function appendHistory(record: HistoryEvent): Promise<void> {
   const entry: HistoryEvent = {
-    ts: record.ts ?? new Date().toISOString(),
     ...record,
+    ts: record.ts ?? new Date().toISOString(),
   };
 
   await ensureDir();
