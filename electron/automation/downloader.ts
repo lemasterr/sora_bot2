@@ -209,39 +209,56 @@ async function getDraftCards(page: Page): Promise<ElementHandle<Element>[]> {
   return cards;
 }
 
+async function openFirstDraftCard(page: Page): Promise<boolean> {
+  await page.waitForSelector(CARD_SELECTOR, { timeout: 60_000 }).catch(() => undefined);
+  const cards = await getDraftCards(page);
+  const first = cards[0];
+  if (!first) return false;
+
+  await first.click();
+  await page.waitForNavigation({ waitUntil: 'networkidle2' }).catch(() => undefined);
+  await page.waitForSelector(RIGHT_PANEL_SELECTOR, { timeout: 60_000 }).catch(() => undefined);
+  return true;
+}
+
 async function goToNextVideoLikeTikTok(page: Page): Promise<boolean> {
   const previousUrl = page.url();
 
-  // Swipe up (scrolling down the document) to advance the feed like TikTok.
-  await page.evaluate(() => {
-    window.scrollBy(0, window.innerHeight * 0.9);
-  });
+  const attempts: Array<() => Promise<void>> = [
+    async () => {
+      await page.evaluate(() => {
+        window.scrollBy(0, window.innerHeight * 0.9);
+      });
+    },
+    async () => {
+      await page.keyboard.press('PageDown').catch(() => undefined);
+    },
+    async () => {
+      await page.keyboard.press('ArrowDown').catch(() => undefined);
+    },
+  ];
 
-  await delay(1800);
-
-  let newUrl = page.url();
-  if (newUrl !== previousUrl) {
-    return true;
+  for (const attempt of attempts) {
+    await attempt();
+    await delay(1500);
+    const newUrl = page.url();
+    if (newUrl !== previousUrl) {
+      return true;
+    }
   }
 
-  // Fallback nudges if the first swipe didn't advance.
-  await page.keyboard.press('PageDown').catch(() => undefined);
-  await delay(1200);
-
-  newUrl = page.url();
-  if (newUrl !== previousUrl) {
-    return true;
-  }
-
-  await page.keyboard.press('ArrowDown').catch(() => undefined);
-  await delay(1200);
-
-  newUrl = page.url();
-  return newUrl !== previousUrl;
+  return false;
 }
 
-export async function runDownloads(session: Session, maxVideos = 0): Promise<DownloadRunResult> {
-  const cancelFlag: CancelFlag = { cancelled: false };
+/**
+ * Download videos for a session using the TikTok-style viewer flow. Shared by session actions and pipeline steps.
+ */
+export async function runDownloads(
+  session: Session,
+  maxVideos = 0,
+  externalCancelFlag?: CancelFlag
+): Promise<DownloadRunResult> {
+  const cancelFlag: CancelFlag = externalCancelFlag ?? { cancelled: false };
   cancellationMap.set(session.id, cancelFlag);
 
   const runId = `download:${session.id}:${Date.now()}`;
@@ -308,18 +325,11 @@ export async function runDownloads(session: Session, maxVideos = 0): Promise<Dow
       const activePage: Page = page;
 
       await activePage.goto(draftsUrl, { waitUntil: 'networkidle2' });
-      await activePage.waitForSelector(CARD_SELECTOR, { timeout: 60_000 }).catch(() => undefined);
-
-      const initialCards = await getDraftCards(activePage);
-      const firstCard = initialCards[0];
-      if (!firstCard) {
+      const opened = await openFirstDraftCard(activePage);
+      if (!opened) {
         logInfo('downloader', 'No draft cards found to start downloads');
         return { ok: true, downloaded };
       }
-
-      await firstCard.click();
-      await activePage.waitForNavigation({ waitUntil: 'networkidle2' }).catch(() => undefined);
-      await activePage.waitForSelector(RIGHT_PANEL_SELECTOR, { timeout: 60_000 }).catch(() => undefined);
     }
 
     while (!fatalWatchdog && !cancelFlag.cancelled) {
@@ -333,6 +343,14 @@ export async function runDownloads(session: Session, maxVideos = 0): Promise<Dow
       heartbeat(runId);
       assertPage(page);
       const activePage: Page = page;
+
+      if (activePage.url().startsWith(draftsUrl)) {
+        const opened = await openFirstDraftCard(activePage);
+        if (!opened) {
+          logInfo('downloader', 'No draft cards found after returning to drafts');
+          break;
+        }
+      }
 
       const currentUrl = activePage.url();
 

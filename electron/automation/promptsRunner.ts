@@ -98,8 +98,14 @@ async function disconnectIfExternal(browser: Browser | null): Promise<void> {
   }
 }
 
-export async function runPrompts(session: Session): Promise<PromptsRunResult> {
-  const cancelFlag: CancelFlag = { cancelled: false };
+/**
+ * Submit prompts for a single session. Shared by direct session actions and pipeline steps.
+ */
+export async function runPrompts(
+  session: Session,
+  externalCancelFlag?: CancelFlag
+): Promise<PromptsRunResult> {
+  const cancelFlag: CancelFlag = externalCancelFlag ?? { cancelled: false };
   cancellationMap.set(session.id, cancelFlag);
 
   const runId = `prompts:${session.id}:${Date.now()}`;
