@@ -1,4 +1,4 @@
-import { spawn } from 'child_process';
+import { spawn, spawnSync } from 'child_process';
 import fs from 'fs';
 import http from 'http';
 import path from 'path';
@@ -43,6 +43,22 @@ function parsePidFromLock(lockPath: string): number | null {
   return null;
 }
 
+function isChromeProcess(pid: number): boolean {
+  if (process.platform === 'win32') return true;
+
+  try {
+    const result = spawnSync('ps', ['-p', `${pid}`, '-o', 'comm='], { encoding: 'utf8' });
+    if (result.error) return true;
+
+    const command = result.stdout?.trim().toLowerCase();
+    if (!command) return true;
+
+    return command.includes('chrome');
+  } catch {
+    return true;
+  }
+}
+
 function isPidRunning(pid: number): boolean {
   try {
     process.kill(pid, 0);
@@ -63,7 +79,11 @@ function isProfileDirInUse(userDataDir: string): boolean {
     const pid = parsePidFromLock(lockPath);
 
     if (pid !== null && isPidRunning(pid)) {
-      return true;
+      if (isChromeProcess(pid)) {
+        return true;
+      }
+
+      // Stale or unrelated process holding the PID; try to clear the lock.
     }
 
     try {
