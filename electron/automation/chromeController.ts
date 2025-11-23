@@ -19,6 +19,7 @@ const deriveProfileFromContext = (ctx: SessionRunContext): ChromeProfile => {
   const directoryName = path.basename(ctx.profileDir) || 'Default';
   const baseDir = path.dirname(ctx.profileDir);
   return {
+    id: directoryName,
     name: directoryName,
     userDataDir: baseDir,
     profileDirectory: directoryName,

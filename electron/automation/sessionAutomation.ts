@@ -77,6 +77,7 @@ const resolveProfileForContext = async (ctx: SessionRunContext): Promise<ChromeP
       const stats = await fs.stat(profilePath);
       if (stats.isDirectory()) {
         return {
+          id: profileDirectory,
           name: profileDirectory,
           userDataDir,
           profileDirectory,

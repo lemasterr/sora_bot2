@@ -7,8 +7,10 @@ import { ensureDir } from '../utils/fs';
 export type Config = {
   sessionsRoot: string;
   chromeExecutablePath: string | null;
+  chromeUserDataRoot?: string | null;
   chromeUserDataDir: string | null;
   chromeActiveProfileName: string | null;
+  chromeProfileId?: string | null;
   chromeClonedProfilesRoot?: string | null;
   cdpPort: number | null;
   promptDelayMs: number;
@@ -45,8 +47,10 @@ function defaultConfig(): Config {
   return {
     sessionsRoot: defaultSessionsRoot,
     chromeExecutablePath: null,
+    chromeUserDataRoot: null,
     chromeUserDataDir: null,
     chromeActiveProfileName: null,
+    chromeProfileId: null,
     chromeClonedProfilesRoot: path.join(defaultSessionsRoot, 'chrome-clones'),
     cdpPort: 9222,
     promptDelayMs: 2000,

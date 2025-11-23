@@ -1,10 +1,13 @@
 import type { Config as BackendConfig } from '../electron/config/config';
 
 export interface ChromeProfile {
+  id: string;
   name: string;
   userDataDir: string;
   profileDirectory: string; // canonical profile directory name inside userDataDir
   profileDir?: string; // backward-compat alias for profileDirectory
+  isDefault?: boolean;
+  lastUsed?: string;
   isActive?: boolean;
 }
 

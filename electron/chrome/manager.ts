@@ -122,7 +122,7 @@ async function ensureChromeWithCDP(profile: ChromeProfile, port: number): Promis
 }
 
 function instanceKey(profile: ChromeProfile): string {
-  const name = profile.name ?? 'profile';
+  const name = profile.profileDirectory ?? profile.name ?? 'profile';
   const base = profile.userDataDir ?? 'user-data';
   const dir = profile.profileDirectory ?? profile.profileDir ?? 'Default';
   return `${base}::${dir}::${name}`;
