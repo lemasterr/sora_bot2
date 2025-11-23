@@ -235,6 +235,13 @@ async function scrollForMoreCards(
   return false;
 }
 
+async function nudgeForNextCard(page: Page): Promise<void> {
+  await page.evaluate(() => {
+    window.scrollBy(0, window.innerHeight * 0.2);
+  });
+  await delay(1500);
+}
+
 export async function runDownloads(session: Session, maxVideos = 0): Promise<DownloadRunResult> {
   const cancelFlag: CancelFlag = { cancelled: false };
   cancellationMap.set(session.id, cancelFlag);
@@ -315,6 +322,8 @@ export async function runDownloads(session: Session, maxVideos = 0): Promise<Dow
         pageIndex = 0;
       }
 
+      await activePage.waitForSelector(CARD_SELECTOR, { timeout: 15_000 }).catch(() => undefined);
+
       const cards = await getDraftCards(activePage);
       const total = cards.length;
 
@@ -375,6 +384,8 @@ export async function runDownloads(session: Session, maxVideos = 0): Promise<Dow
       } finally {
         if (!cancelFlag.cancelled) {
           await activePage.goto(draftsUrl, { waitUntil: 'networkidle2' }).catch(() => undefined);
+          await activePage.waitForSelector(CARD_SELECTOR, { timeout: 15_000 }).catch(() => undefined);
+          await nudgeForNextCard(activePage);
         }
       }
 
