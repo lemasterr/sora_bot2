@@ -2,6 +2,7 @@ import fs from 'fs/promises';
 import path from 'path';
 import type { Browser, ElementHandle, Page } from 'puppeteer-core';
 import type { RunResult } from '../../shared/types';
+import { selectors, waitForClickable, waitForVisible } from '../../core/selectors/selectors';
 import { configureDownloads, newPage, type SessionRunContext } from './chromeController';
 import { getOrLaunchChromeForProfile } from '../chrome/manager';
 import { resolveSessionCdpPort } from '../utils/ports';
@@ -9,12 +10,7 @@ import { resolveChromeProfileForSession, type ChromeProfile } from '../chrome/pr
 
 const delay = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
 
-const PROMPT_INPUT_SELECTOR = "textarea[data-testid='prompt-input']";
-const SUBMIT_BUTTON_SELECTOR = "button[data-testid='submit']";
-const IMAGE_INPUT_SELECTOR = "input[type='file']";
 const DRAFTS_URL = 'https://sora.chatgpt.com/drafts';
-const DRAFT_CARD_SELECTOR = '.sora-draft-card';
-const DOWNLOAD_BUTTON_SELECTOR = "button[data-testid='download']";
 
 const sessionLocks = new Set<string>();
 const sessionContexts = new Map<string, SessionRunContext>();
@@ -179,7 +175,7 @@ const findLatestDownloadedFile = async (directory: string): Promise<string | nul
 
 const waitForDraftAcceptance = async (page: Page, config: SessionRunContext['config']) => {
   await Promise.race([
-    page.waitForSelector(`${SUBMIT_BUTTON_SELECTOR}:not([disabled])`, { timeout: config.draftTimeoutMs }).catch(() => null),
+    waitForClickable(page, selectors.enabledSubmitButton, config.draftTimeoutMs).catch(() => null),
     delay(config.promptDelayMs)
   ]);
 };
@@ -203,7 +199,7 @@ const runPromptsInternal = async (ctx: SessionRunContext): Promise<RunResult> =>
     const page = await newPage(browser);
     await configureDownloads(page, ctx.downloadsDir);
     await page.goto('https://sora.chatgpt.com', { waitUntil: 'networkidle2' });
-    await page.waitForSelector(PROMPT_INPUT_SELECTOR, { timeout: ctx.config.draftTimeoutMs });
+    await waitForVisible(page, selectors.promptInput, ctx.config.draftTimeoutMs);
 
     for (let i = 0; i < prompts.length; i += 1) {
       if (ctx.cancelled) {
@@ -218,14 +214,14 @@ const runPromptsInternal = async (ctx: SessionRunContext): Promise<RunResult> =>
       const imagePath = (imagePrompts[i] ?? '').trim();
 
       try {
-        await page.click(PROMPT_INPUT_SELECTOR, { clickCount: 3 });
+        await page.click(selectors.promptInput, { clickCount: 3, delay: 80 });
         await page.keyboard.press('Backspace');
-        await page.type(PROMPT_INPUT_SELECTOR, promptText);
+        await page.type(selectors.promptInput, promptText);
 
         if (imagePath) {
           try {
             await fs.access(imagePath);
-            const imageInput = await page.$(IMAGE_INPUT_SELECTOR);
+            const imageInput = await page.$(selectors.fileInput);
             if (!imageInput) {
               throw new Error('Image input not found');
             }
@@ -235,11 +231,11 @@ const runPromptsInternal = async (ctx: SessionRunContext): Promise<RunResult> =>
           }
         }
 
-        const submitButton = await page.$(SUBMIT_BUTTON_SELECTOR);
+        const submitButton = await page.$(selectors.submitButton);
         if (!submitButton) {
           throw new Error('Submit button not found');
         }
-        await submitButton.click();
+        await submitButton.click({ delay: 80 });
 
         await waitForDraftAcceptance(page, ctx.config);
 
@@ -317,11 +313,9 @@ const downloadDraftCard = async (
 ): Promise<string> => {
   await fs.mkdir(ctx.downloadsDir, { recursive: true });
 
-  await cardHandle.click();
+  await cardHandle.click({ delay: 80 });
 
-  const downloadButton = await page.waitForSelector(DOWNLOAD_BUTTON_SELECTOR, {
-    timeout: ctx.config.downloadTimeoutMs
-  });
+  const downloadButton = await waitForClickable(page, selectors.downloadButton, ctx.config.downloadTimeoutMs);
 
   if (!downloadButton) {
     throw new Error('Download button not found');
@@ -329,7 +323,7 @@ const downloadDraftCard = async (
 
   const downloadPromise = waitForDownloadCompletion(page, ctx.config.downloadTimeoutMs);
 
-  await downloadButton.click();
+  await downloadButton.click({ delay: 80 });
 
   await downloadPromise;
 
@@ -370,9 +364,9 @@ export const runDownloads = async (ctx: SessionRunContext, maxVideos: number): P
       const page = await newPage(browser);
       await configureDownloads(page, ctx.downloadsDir);
       await page.goto(DRAFTS_URL, { waitUntil: 'networkidle2' });
-      await page.waitForSelector(DRAFT_CARD_SELECTOR, { timeout: ctx.config.downloadTimeoutMs });
+      await waitForVisible(page, selectors.draftCard, ctx.config.downloadTimeoutMs);
 
-      const cards = await page.$$(DRAFT_CARD_SELECTOR);
+      const cards = await page.$$(selectors.draftCard);
       const total = Math.min(cards.length, titles.length, Math.max(0, maxVideos));
 
       for (let i = 0; i < total; i += 1) {
@@ -431,7 +425,7 @@ export const scanDrafts = async (ctx: SessionRunContext): Promise<RunResult> => 
 
     const page = await newPage(browser);
     await page.goto(DRAFTS_URL, { waitUntil: 'networkidle2' });
-    const cards = await page.$$(DRAFT_CARD_SELECTOR);
+    const cards = await page.$$(selectors.draftCard);
 
     return { ok: true, draftsFound: cards.length, details: `${cards.length} drafts found` };
   } catch (error) {

@@ -1,11 +1,13 @@
 import fs from 'fs/promises';
-import fsSync from 'fs';
-import os from 'os';
 import path from 'path';
+
+import {
+  type ChromeProfile as CoreChromeProfile,
+  scanProfiles as coreScanProfiles,
+} from '../../core/chrome/profiles';
 import { getConfig, updateConfig } from '../config/config';
 import { logError, logInfo } from '../logging/logger';
 import { ensureDir } from '../utils/fs';
-import { findSystemChromeExecutable } from './paths';
 
 export type ChromeProfile = {
   id: string;
@@ -13,6 +15,8 @@ export type ChromeProfile = {
   userDataDir: string;
   profileDirectory: string;
   profileDir?: string;
+  /** Absolute path to the specific profile directory (e.g., .../Chrome/Default). */
+  path?: string;
   isDefault?: boolean;
   lastUsed?: string;
   isActive?: boolean;
@@ -33,34 +37,23 @@ export type SessionProfilePreference = {
 
 let cachedProfiles: ChromeProfile[] | null = null;
 
-export function getChromeUserDataRoot(): string | null {
-  const home = os.homedir();
-  const exists = (candidate: string | null): candidate is string => {
-    if (!candidate) return false;
-    try {
-      return require('fs').existsSync(candidate);
-    } catch {
-      return false;
-    }
+function mapCoreProfile(profile: CoreChromeProfile): ChromeProfile {
+  const profileDirectory = path.basename(profile.path);
+  const userDataDir = path.dirname(profile.path);
+
+  return {
+    id: profile.id,
+    name: profile.name,
+    userDataDir,
+    profileDirectory,
+    profileDir: profileDirectory,
+    isDefault: profile.isDefault ?? profileDirectory === 'Default',
+    path: profile.path,
   };
+}
 
-  if (process.platform === 'darwin') {
-    const target = path.join(home, 'Library', 'Application Support', 'Google', 'Chrome');
-    return exists(target) ? target : null;
-  }
-
-  if (process.platform.startsWith('win')) {
-    const base = process.env.LOCALAPPDATA || process.env.APPDATA || process.env.USERPROFILE;
-    const target = base ? path.join(base, 'Google', 'Chrome', 'User Data') : null;
-    return exists(target) ? target : null;
-  }
-
-  const candidates = [path.join(home, '.config', 'google-chrome'), path.join(home, '.config', 'chromium')];
-  for (const candidate of candidates) {
-    if (exists(candidate)) return candidate;
-  }
-
-  return null;
+function mapCoreProfiles(profiles: CoreChromeProfile[]): ChromeProfile[] {
+  return profiles.map(mapCoreProfile);
 }
 
 function slugifyProfileName(name: string): string {
@@ -189,45 +182,6 @@ async function rewriteLocalStateForClone(
   }
 }
 
-export function readChromeProfiles(root: string): ChromeProfile[] {
-  const localStatePath = path.join(root, 'Local State');
-  const profiles: ChromeProfile[] = [];
-
-  try {
-    const raw = require('fs').readFileSync(localStatePath, 'utf-8');
-    const parsed = JSON.parse(raw);
-    const infoCache = parsed?.profile?.info_cache ?? {};
-
-    for (const [id, info] of Object.entries<any>(infoCache)) {
-      const displayName = info?.name || info?.gaia_name || id;
-      const isDefault = id === 'Default' || info?.is_default === true;
-      const lastUsed = info?.last_used as string | undefined;
-
-      profiles.push({
-        id,
-        name: displayName,
-        userDataDir: root,
-        profileDirectory: id,
-        profileDir: id,
-        isDefault,
-        lastUsed,
-      });
-    }
-  } catch (error) {
-    logError('chromeProfiles', `Failed to read Local State from ${localStatePath}: ${(error as Error).message}`);
-    return [];
-  }
-
-  profiles.sort((a, b) => {
-    if (a.isDefault && !b.isDefault) return -1;
-    if (b.isDefault && !a.isDefault) return 1;
-    if (a.lastUsed && b.lastUsed && a.lastUsed !== b.lastUsed) return a.lastUsed > b.lastUsed ? -1 : 1;
-    return a.name.localeCompare(b.name);
-  });
-
-  return profiles;
-}
-
 function annotateActive(
   profiles: ChromeProfile[],
   activeId?: string | null,
@@ -293,42 +247,17 @@ export async function resolveProfileLaunchTarget(
 
 export async function scanChromeProfiles(): Promise<ChromeProfile[]> {
   const config = await getConfig();
-
-  const chromeBinary = await findSystemChromeExecutable();
-  if (!chromeBinary) {
-    logError('chromeProfiles', 'Chrome executable not found. Install Chrome or set the path in Settings.');
-  }
-
-  const roots: string[] = [];
-  if (config.chromeUserDataRoot) roots.push(config.chromeUserDataRoot);
-  else if (config.chromeUserDataDir) roots.push(config.chromeUserDataDir);
-
-  const systemRoot = getChromeUserDataRoot();
-  if (systemRoot && !roots.includes(systemRoot)) roots.push(systemRoot);
-
-  const uniqueRoots = roots.filter(Boolean);
-  if (uniqueRoots.length === 0) {
-    logError('chromeProfiles', 'Chrome user-data root not found. Please configure it in Settings.');
-    cachedProfiles = [];
-    return [];
-  }
-
-  const profiles: ChromeProfile[] = [];
-
-  for (const root of uniqueRoots) {
-    const exists = await dirExists(root);
-    if (!exists) continue;
-    const found = readChromeProfiles(root);
-    logInfo('chromeProfiles', `Found ${found.length} profiles under ${root}`);
-    profiles.push(...found.filter((p) => !profiles.find((q) => q.id === p.id && q.userDataDir === p.userDataDir)));
-  }
+  const coreProfiles = coreScanProfiles();
+  const mapped = mapCoreProfiles(coreProfiles);
 
   const annotated = annotateActive(
-    profiles,
+    mapped,
     config.chromeProfileId ?? config.chromeActiveProfileName ?? undefined,
     config.chromeUserDataRoot ?? config.chromeUserDataDir ?? undefined
   );
+
   cachedProfiles = annotated;
+  logInfo('chromeProfiles', `Found ${annotated.length} profiles from system scan`);
   return annotated;
 }
 
