@@ -14,9 +14,5 @@
     "allowSyntheticDefaultImports": true
   },
   "include": ["electron", "src", "shared", "vite.config.ts"],
-  "references": [
-    {
-      "path": "./tsconfig.electron.json"
-    }
-  ]
+  "exclude": ["dist", "dist-electron"]
 }

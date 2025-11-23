@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { useAppStore } from '../store';
-import type { ChromeProfile, Config } from '../shared/types';
+import type { ChromeProfile, Config } from '../../shared/types';
 
 const DEFAULT_CONFIG: Config = {
   sessionsRoot: '',

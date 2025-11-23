@@ -17,7 +17,9 @@ export const TelegramPage: React.FC = () => {
   }, [config]);
 
   const save = async () => {
-    const updated = await window.electronAPI.updateConfig({
+    const api = window.electronAPI;
+    if (!api?.updateConfig) return;
+    const updated = await api.updateConfig({
       telegram: {
         enabled,
         botToken: botToken || null,
@@ -29,8 +31,10 @@ export const TelegramPage: React.FC = () => {
   };
 
   const sendTest = async () => {
+    const api = window.electronAPI;
+    if (!api?.telegramTest) return;
     setStatus('Sending test…');
-    const result = await window.electronAPI.telegramTest();
+    const result = await api.telegramTest();
     setStatus(result.ok ? result.details || 'Sent' : result.error || 'Failed');
     await refreshConfig();
   };

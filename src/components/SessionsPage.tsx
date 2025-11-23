@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import type { ManagedSession, ChromeProfile, RunResult } from '../shared/types';
+import type { ManagedSession, ChromeProfile, RunResult } from '../../shared/types';
 import { SessionWindow } from './SessionWindow';
 
 const statusColors: Record<NonNullable<ManagedSession['status']>, string> = {
@@ -86,7 +86,9 @@ export const SessionsPage: React.FC = () => {
   };
 
   const handlePick = async (key: keyof ManagedSession, type: 'file' | 'folder') => {
-    const picker = type === 'file' ? window.electronAPI.chooseFile : window.electronAPI.chooseSessionsRoot;
+    const api = window.electronAPI;
+    const picker = type === 'file' ? api?.chooseFile : api?.chooseSessionsRoot;
+    if (!picker) return;
     const value = await picker();
     if (value) {
       handleChange(key, value as ManagedSession[typeof key]);
@@ -94,9 +96,10 @@ export const SessionsPage: React.FC = () => {
   };
 
   const saveSession = async () => {
-    if (!window.electronAPI.sessions) return;
+    const api = window.electronAPI;
+    if (!api?.sessions) return;
     setSaving(true);
-    const saved = await window.electronAPI.sessions.save(form);
+    const saved = await api.sessions.save(form);
     setSessions((prev) => {
       const existingIndex = prev.findIndex((s) => s.id === saved.id);
       if (existingIndex >= 0) {
@@ -119,36 +122,37 @@ export const SessionsPage: React.FC = () => {
   };
 
   const handleAction = async (action: 'prompts' | 'downloads' | 'stop' | 'open' | 'startChrome') => {
-    if (!form.id || !window.electronAPI.sessions) return;
+    const api = window.electronAPI;
+    if (!form.id || !api?.sessions) return;
     if (action === 'open') {
       setOpenWindowId(form.id);
       setActionMessage('Session window opened');
       return;
     }
 
-    const autogen = window.electronAPI.autogen;
-    const downloader = window.electronAPI.downloader;
+    const autogen = api.autogen;
+    const downloader = api.downloader;
     let result: RunResult | undefined;
 
     if (action === 'prompts') {
       result = (await autogen?.run?.(form.id)) as RunResult;
-      if (!result && window.electronAPI.sessions.runPrompts) {
-        result = await window.electronAPI.sessions.runPrompts(form.id);
+      if (!result && api.sessions.runPrompts) {
+        result = await api.sessions.runPrompts(form.id);
       }
     } else if (action === 'downloads') {
       result = (await downloader?.run?.(form.id, { limit: form.maxVideos ?? 0 })) as RunResult;
-      if (!result && window.electronAPI.sessions.runDownloads) {
-        result = await window.electronAPI.sessions.runDownloads(form.id, form.maxVideos);
+      if (!result && api.sessions.runDownloads) {
+        result = await api.sessions.runDownloads(form.id, form.maxVideos);
       }
     } else if (action === 'startChrome') {
-      if (window.electronAPI.sessions.command) {
-        result = (await window.electronAPI.sessions.command(form.id, 'startChrome')) as RunResult;
+      if (api.sessions.command) {
+        result = (await api.sessions.command(form.id, 'startChrome')) as RunResult;
       }
     } else {
       result = (await autogen?.stop?.(form.id)) as RunResult;
       await downloader?.stop?.(form.id);
-      if (!result && window.electronAPI.sessions.cancelPrompts) {
-        result = await window.electronAPI.sessions.cancelPrompts(form.id);
+      if (!result && api.sessions.cancelPrompts) {
+        result = await api.sessions.cancelPrompts(form.id);
       }
     }
 

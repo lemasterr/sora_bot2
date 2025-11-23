@@ -3,7 +3,9 @@
   "compilerOptions": {
     "module": "CommonJS",
     "outDir": "dist-electron",
-    "noEmit": false
+    "noEmit": false,
+    "composite": true,
+    "declaration": true
   },
   "include": ["electron/**/*.ts", "shared/**/*.ts"]
 }

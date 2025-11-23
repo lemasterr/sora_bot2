@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import type { ChromeProfile, SessionFiles } from '../shared/types';
+import type { ChromeProfile, SessionFiles } from '../../shared/types';
 
 const panelClass =
   'rounded-2xl border border-zinc-800 bg-[#0f0f12] shadow-lg shadow-blue-500/5 transition-all';

@@ -5,7 +5,7 @@ import {
   type WatermarkMask,
   type WatermarkRect,
   type WatermarkCleanResult
-} from '../shared/types';
+} from '../../shared/types';
 import { useAppStore } from '../store';
 
 interface FrameCardProps {
@@ -75,7 +75,9 @@ export const WatermarkPage: React.FC = () => {
   const [busy, setBusy] = useState<boolean>(false);
 
   const loadVideos = async () => {
-    const list = await window.electronAPI.listDownloadedVideos();
+    const api = window.electronAPI;
+    if (!api?.listDownloadedVideos) return;
+    const list = (await api.listDownloadedVideos()) as DownloadedVideo[];
     setVideos(list);
     if (list.length > 0) {
       setSelected((current) => current || list[0].path);
@@ -83,7 +85,9 @@ export const WatermarkPage: React.FC = () => {
   };
 
   const loadMasks = async () => {
-    const saved = await window.electronAPI.watermark.listMasks();
+    const api = window.electronAPI;
+    if (!api?.watermark?.listMasks) return;
+    const saved = (await api.watermark.listMasks()) as WatermarkMask[];
     setMasks(saved);
     if (saved.length > 0) {
       setActiveMaskId((current) => current || saved[0].id);
@@ -107,11 +111,13 @@ export const WatermarkPage: React.FC = () => {
 
   const handleDetect = async () => {
     if (!selected) return;
+    const api = window.electronAPI;
+    if (!api?.watermark?.detect) return;
     setBusy(true);
     setStatus('Detecting watermark zones…');
     setCleanResult(null);
     try {
-      const result = await window.electronAPI.watermark.detect(selected, templatePath || undefined);
+      const result = (await api.watermark.detect(selected, templatePath || undefined)) as WatermarkDetectionResult;
       setDetection(result);
       if (result.suggestedMask) {
         setMaskName(result.suggestedMask.name);
@@ -137,14 +143,16 @@ export const WatermarkPage: React.FC = () => {
       setStatus('Add at least one blur zone before saving');
       return;
     }
+    const api = window.electronAPI;
+    if (!api?.watermark?.saveMask) return;
     const payload: WatermarkMask = {
       id: activeMaskId,
       name: maskName || 'Custom Mask',
       rects
     };
-    const saved = await window.electronAPI.watermark.saveMask(payload);
+    const saved = (await api.watermark.saveMask(payload)) as WatermarkMask[];
     setMasks(saved);
-    const match = saved.find((m) => m.name === payload.name || m.id === payload.id);
+    const match = saved.find((m: WatermarkMask) => m.name === payload.name || m.id === payload.id);
     if (match) {
       setActiveMaskId(match.id);
       setStatus(`Saved mask "${match.name}"`);
@@ -153,16 +161,18 @@ export const WatermarkPage: React.FC = () => {
 
   const handleClean = async () => {
     if (!selected) return;
+    const api = window.electronAPI;
+    if (!api?.watermark?.clean) return;
     setBusy(true);
     setStatus('Cleaning videos…');
     try {
       const toClean = videos.map((v) => v.path);
-      const result = await window.electronAPI.watermark.clean(toClean, activeMaskId || undefined);
+      const result = (await api.watermark.clean(toClean, activeMaskId || undefined)) as WatermarkCleanResult;
       setCleanResult(result);
       if (!result.ok) {
         setStatus(result.error ?? 'Cleaner failed');
       } else {
-        const cleaned = result.items.filter((i) => i.status === 'cleaned').length;
+        const cleaned = result.items.filter((i: WatermarkCleanResult['items'][number]) => i.status === 'cleaned').length;
         setStatus(`Cleaner finished (${cleaned}/${result.items.length} cleaned)`);
       }
     } catch (error) {
