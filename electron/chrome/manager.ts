@@ -201,6 +201,11 @@ async function ensureChromeWithCDP(profile: ChromeProfile, port: number): Promis
   });
 
   const { userDataDir, profileDirectoryArg } = await resolveProfileLaunchTarget(profile);
+  // NOTE:
+  // resolveProfileLaunchTarget now always returns a cloned "automation" userDataDir
+  // under sessions/chrome-clones, not the real system profile root.
+  // This matches Sora 9 behavior (Chrome via DevTools against a dedicated profile)
+  // and avoids conflicts with the user's main Chrome instance.
   const activePort = await findDevToolsActivePort(new Set([userDataDir, profile.userDataDir].filter(Boolean)));
   if (activePort) {
     const activeEndpoint = `http://${CDP_HOST}:${activePort}`;

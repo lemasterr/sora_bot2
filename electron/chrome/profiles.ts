@@ -135,27 +135,40 @@ function annotateActive(
 export async function resolveProfileLaunchTarget(
   profile: ChromeProfile
 ): Promise<{ userDataDir: string; profileDirectoryArg?: string }> {
-  // Launch Chrome against the real user-data root and pass the profile
-  // directory explicitly so Chrome can read shared state from "Local State"
-  // and reuse the selected profile with its existing cookies/extensions.
-  let userDataDir = profile.userDataDir;
-  let profileDirectoryArg = profile.profileDirectory ?? profile.profileDir ?? profile.id ?? 'Default';
+  /**
+   * Sora 9–style behavior:
+   * We NEVER launch Chrome directly against the system user-data root like:
+   *   ~/Library/Application Support/Google/Chrome
+   *
+   * Instead, we always use a dedicated "automation" clone directory under
+   *   config.chromeClonedProfilesRoot (default: <sessionsRoot>/chrome-clones)
+   * so that:
+   *   - normal Chrome can stay open on the main profile,
+   *   - automation Chrome instances are fully sandboxed,
+   *   - each selected profile gets its own stable clone dir.
+   *
+   * The "profile" argument still comes from scanChromeProfiles(), which reads
+   * the real profiles, but the launched Chrome will use our cloned dir.
+   */
 
-  // If the configured userDataDir is actually a profile folder (e.g., ".../Chrome/Profile 2"),
-  // lift it to its parent that contains "Local State" and treat the leaf as the profile directory.
-  const localStatePath = path.join(userDataDir, 'Local State');
-  if (!fsSync.existsSync(localStatePath)) {
-    const parent = path.dirname(userDataDir);
-    const parentLocalState = path.join(parent, 'Local State');
-    if (fsSync.existsSync(parentLocalState) && fsSync.existsSync(userDataDir)) {
-      userDataDir = parent;
-      if (!profileDirectoryArg) {
-        profileDirectoryArg = path.basename(profile.userDataDir);
-      }
-    }
-  }
+  const config = await getConfig();
+  const cloneRoot =
+    config.chromeClonedProfilesRoot || path.join(config.sessionsRoot, 'chrome-clones');
 
-  return { userDataDir, profileDirectoryArg };
+  // Ensure root exists
+  await ensureDir(cloneRoot);
+
+  // Build a stable slug for this profile's automation clone
+  const baseName = profile.profileDirectory || profile.name || profile.id;
+  const slug = slugifyProfileName(`${baseName}-sora-clone`);
+
+  // Final cloned user-data dir for automation
+  const userDataDir = path.join(cloneRoot, slug);
+
+  // We intentionally DO NOT pass --profile-directory here.
+  // Chrome will treat this userDataDir as an independent profile root.
+  // All cookies/extensions/logins for Sora will live under this clone dir.
+  return { userDataDir, profileDirectoryArg: undefined };
 }
 
 export async function scanChromeProfiles(): Promise<ChromeProfile[]> {
