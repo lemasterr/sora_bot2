@@ -1,4 +1,5 @@
 import fs from 'fs/promises';
+import fsSync from 'fs';
 import os from 'os';
 import path from 'path';
 import { getConfig, updateConfig } from '../config/config';
@@ -137,7 +138,24 @@ export async function resolveProfileLaunchTarget(
   // Launch Chrome against the real user-data root and pass the profile
   // directory explicitly so Chrome can read shared state from "Local State"
   // and reuse the selected profile with its existing cookies/extensions.
-  return { userDataDir: profile.userDataDir, profileDirectoryArg: profile.profileDirectory };
+  let userDataDir = profile.userDataDir;
+  let profileDirectoryArg = profile.profileDirectory ?? profile.profileDir ?? profile.id ?? 'Default';
+
+  // If the configured userDataDir is actually a profile folder (e.g., ".../Chrome/Profile 2"),
+  // lift it to its parent that contains "Local State" and treat the leaf as the profile directory.
+  const localStatePath = path.join(userDataDir, 'Local State');
+  if (!fsSync.existsSync(localStatePath)) {
+    const parent = path.dirname(userDataDir);
+    const parentLocalState = path.join(parent, 'Local State');
+    if (fsSync.existsSync(parentLocalState) && fsSync.existsSync(userDataDir)) {
+      userDataDir = parent;
+      if (!profileDirectoryArg) {
+        profileDirectoryArg = path.basename(profile.userDataDir);
+      }
+    }
+  }
+
+  return { userDataDir, profileDirectoryArg };
 }
 
 export async function scanChromeProfiles(): Promise<ChromeProfile[]> {
