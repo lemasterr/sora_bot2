@@ -11,6 +11,16 @@ import { formatTemplate, sendTelegramMessage } from '../integrations/telegram';
 import { heartbeat, startWatchdog, stopWatchdog } from './watchdog';
 import { registerSessionPage, unregisterSessionPage } from './selectorInspector';
 
+function delay(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function assertPage(page: Page | null): asserts page is Page {
+  if (!page) {
+    throw new Error('No active page');
+  }
+}
+
 export type PromptsRunResult = {
   ok: boolean;
   submitted: number;
@@ -127,6 +137,7 @@ export async function runPrompts(session: Session): Promise<PromptsRunResult> {
       heartbeat(runId);
       const promptText = prompts[index];
       if (!promptText || !page) continue;
+      assertPage(page);
 
       const imagePath = imagePrompts[index];
 
@@ -143,7 +154,7 @@ export async function runPrompts(session: Session): Promise<PromptsRunResult> {
         }
 
         await page.click(SUBMIT_SELECTOR);
-        await page.waitForTimeout(config.promptDelayMs);
+        await delay(config.promptDelayMs);
         heartbeat(runId);
 
         submitted += 1;

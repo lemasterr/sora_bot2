@@ -12,6 +12,16 @@ import { heartbeat, startWatchdog, stopWatchdog } from './watchdog';
 import { registerSessionPage, unregisterSessionPage } from './selectorInspector';
 import { runPostDownloadHook } from './hooks';
 
+function delay(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function assertPage(page: Page | null): asserts page is Page {
+  if (!page) {
+    throw new Error('No active page');
+  }
+}
+
 export type DownloadRunResult = {
   ok: boolean;
   downloaded: number;
@@ -185,6 +195,7 @@ export async function runDownloads(session: Session, maxVideos: number): Promise
       if (hardCap > 0 && downloaded >= hardCap) break;
 
       heartbeat(runId);
+      assertPage(page);
       const cards = await page.$$(CARD_SELECTOR);
       const maxCount = Math.min(cards.length, titles.length, hardCap > 0 ? hardCap : Number.POSITIVE_INFINITY);
       if (cards.length === 0 || index >= maxCount) break;
@@ -216,7 +227,7 @@ export async function runDownloads(session: Session, maxVideos: number): Promise
       }
 
       heartbeat(runId);
-      await page.waitForTimeout(1000);
+      await delay(1000);
     }
 
     if (fatalWatchdog) {

@@ -4,6 +4,8 @@ import type { Browser, ElementHandle, Page } from 'puppeteer-core';
 import type { RunResult } from '../../shared/types';
 import { configureDownloads, launchBrowser, newPage, type SessionRunContext } from './chromeController';
 
+const delay = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
+
 const PROMPT_INPUT_SELECTOR = "textarea[data-testid='prompt-input']";
 const SUBMIT_BUTTON_SELECTOR = "button[data-testid='submit']";
 const IMAGE_INPUT_SELECTOR = "input[type='file']";
@@ -141,7 +143,7 @@ const findLatestDownloadedFile = async (directory: string): Promise<string | nul
 const waitForDraftAcceptance = async (page: Page, config: SessionRunContext['config']) => {
   await Promise.race([
     page.waitForSelector(`${SUBMIT_BUTTON_SELECTOR}:not([disabled])`, { timeout: config.draftTimeoutMs }).catch(() => null),
-    page.waitForTimeout(config.promptDelayMs)
+    delay(config.promptDelayMs)
   ]);
 };
 
@@ -249,11 +251,19 @@ const waitForDownloadCompletion = async (
     const handler = (event: { state: string }) => {
       if (event.state === 'completed') {
         clearTimeout(timeout);
-        client.removeListener('Page.downloadProgress', handler);
+        if (typeof client.off === 'function') {
+          client.off('Page.downloadProgress', handler as never);
+        } else {
+          client.removeAllListeners('Page.downloadProgress');
+        }
         resolve();
       } else if (event.state === 'canceled') {
         clearTimeout(timeout);
-        client.removeListener('Page.downloadProgress', handler);
+        if (typeof client.off === 'function') {
+          client.off('Page.downloadProgress', handler as never);
+        } else {
+          client.removeAllListeners('Page.downloadProgress');
+        }
         reject(new Error('Download cancelled'));
       }
     };
@@ -339,7 +349,7 @@ export const runDownloads = async (ctx: SessionRunContext, maxVideos: number): P
         try {
           lastDownloadedFile = await downloadDraftCard(page, card, title, ctx);
           downloadedCount += 1;
-          await page.waitForTimeout(1000);
+          await delay(1000);
         } catch (error) {
           skippedCount += 1;
           const errorMessage = error instanceof Error ? error.message : 'Unknown error';
