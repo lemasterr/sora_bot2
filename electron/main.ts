@@ -14,7 +14,6 @@ import { runDownloads, cancelDownloads } from './automation/downloader';
 import { runPipeline, cancelPipeline } from './automation/pipeline';
 import { extractPreviewFrames, pickSmartPreviewFrames } from './video/ffmpegWatermark';
 import { blurVideoWithProfile, listBlurProfiles, saveBlurProfile, deleteBlurProfile } from './video/ffmpegBlur';
-import { listDownloadedVideos } from './video/downloads';
 import { testTelegram, sendTelegramMessage } from './integrations/telegram';
 import { loggerEvents, logError } from './logging/logger';
 import { getDailyStats, getTopSessions } from './logging/history';
@@ -357,8 +356,6 @@ handle('window:close', async () => {
   mainWindow?.close();
   return { ok: true };
 });
-
-handle('downloads:list', async () => listDownloadedVideos());
 
 handle('video:extractPreviewFrames', async (videoPath: string, count: number) => extractPreviewFrames(videoPath, count));
 handle('video:pickSmartPreviewFrames', async (videoPath: string, count: number) => pickSmartPreviewFrames(videoPath, count));
