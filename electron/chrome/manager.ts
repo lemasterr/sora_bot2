@@ -1,5 +1,7 @@
 import { spawn } from 'child_process';
+import fs from 'fs';
 import http from 'http';
+import path from 'path';
 import puppeteer, { type Browser } from 'puppeteer-core';
 
 import { getConfig } from '../config/config';
@@ -20,6 +22,34 @@ type ChromeInstance = {
 };
 
 const activeInstances = new Map<string, ChromeInstance>();
+
+async function terminateSpawnedProcess(pid?: number): Promise<void> {
+  if (!pid) return;
+
+  if (process.platform === 'win32') {
+    await new Promise<void>((resolve) => {
+      const killer = spawn('taskkill', ['/PID', `${pid}`, '/T', '/F'], { stdio: 'ignore' });
+      killer.on('exit', () => resolve());
+      killer.on('error', () => resolve());
+    });
+    return;
+  }
+
+  try {
+    process.kill(pid, 'SIGTERM');
+  } catch {
+    // ignore
+  }
+
+  await delay(500);
+
+  try {
+    process.kill(pid, 0);
+    process.kill(pid, 'SIGKILL');
+  } catch {
+    // ignore if already exited
+  }
+}
 
 function delay(ms: number) {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -52,18 +82,29 @@ async function waitForEndpoint(endpoint: string, timeoutMs = 15000): Promise<voi
 type LaunchInfo = { endpoint: string; alreadyRunning: boolean; childPid?: number };
 
 async function ensureChromeWithCDP(profile: ChromeProfile, port: number): Promise<LaunchInfo> {
+  const endpoint = `http://${CDP_HOST}:${port}`;
+  if (await isEndpointAvailable(endpoint)) {
+    return { endpoint, alreadyRunning: true };
+  }
+
   const config = await getConfig();
   const executablePath = await resolveChromeExecutablePath().catch((error) => {
     if (config.chromeExecutablePath) return config.chromeExecutablePath;
     throw error;
   });
 
-  const endpoint = `http://${CDP_HOST}:${port}`;
-  if (await isEndpointAvailable(endpoint)) {
-    return { endpoint, alreadyRunning: true };
+  const { userDataDir, profileDirectoryArg } = await resolveProfileLaunchTarget(profile);
+
+  if (!fs.existsSync(userDataDir)) {
+    throw new Error(`Chrome profile directory not found at ${userDataDir}. Please re-select the profile in Settings.`);
   }
 
-  const { userDataDir, profileDirectoryArg } = await resolveProfileLaunchTarget(profile);
+  if (profileDirectoryArg) {
+    const profileDirPath = path.join(userDataDir, profileDirectoryArg);
+    if (!fs.existsSync(profileDirPath)) {
+      throw new Error(`Chrome profile "${profileDirectoryArg}" is missing under ${userDataDir}. Choose another profile.`);
+    }
+  }
   const args = [
     `--remote-debugging-port=${port}`,
     `--user-data-dir=${userDataDir}`,
@@ -94,7 +135,7 @@ async function ensureChromeWithCDP(profile: ChromeProfile, port: number): Promis
 }
 
 function instanceKey(profile: ChromeProfile): string {
-  const name = profile.name ?? 'profile';
+  const name = profile.profileDirectory ?? profile.name ?? 'profile';
   const base = profile.userDataDir ?? 'user-data';
   const dir = profile.profileDirectory ?? profile.profileDir ?? 'Default';
   return `${base}::${dir}::${name}`;
@@ -118,8 +159,8 @@ export async function getOrLaunchChromeForProfile(profile: ChromeProfile, port: 
     defaultViewport: null,
   })) as Browser & { __soraAlreadyRunning?: boolean; __soraManaged?: boolean };
 
-  browser.__soraAlreadyRunning = true; // keep windows open between runs
-  browser.__soraManaged = true;
+  browser.__soraAlreadyRunning = alreadyRunning;
+  browser.__soraManaged = !alreadyRunning;
 
   activeInstances.set(key, {
     key,
@@ -148,27 +189,40 @@ export async function getOrLaunchChromeForProfile(profile: ChromeProfile, port: 
   return browser;
 }
 
-export function closeChromeForProfile(profile: ChromeProfile): void {
-  const key = instanceKey(profile);
+export async function shutdownChromeByKey(key: string): Promise<void> {
   const existing = activeInstances.get(key);
-  if (existing) {
-    activeInstances.delete(key);
-    try {
-      existing.browser.close();
-    } catch {
-      // ignore close errors
-    }
+
+  if (!existing) return;
+
+  activeInstances.delete(key);
+
+  try {
+    await existing.browser.close();
+  } catch {
+    // ignore close errors
+  }
+
+  if (existing.spawned && existing.childPid) {
+    await terminateSpawnedProcess(existing.childPid);
   }
 }
 
-export function shutdownAllChrome(): void {
-  for (const instance of activeInstances.values()) {
+export async function shutdownChromeForProfile(profile: ChromeProfile): Promise<void> {
+  await shutdownChromeByKey(instanceKey(profile));
+}
+
+export function closeChromeForProfile(profile: ChromeProfile): void {
+  shutdownChromeForProfile(profile).catch(() => undefined);
+}
+
+export async function shutdownAllChrome(): Promise<void> {
+  const keys = Array.from(activeInstances.keys());
+  for (const key of keys) {
     try {
-      instance.browser.close();
+      await shutdownChromeByKey(key);
     } catch {
-      // ignore
+      // ignore shutdown errors
     }
   }
-  activeInstances.clear();
 }
 

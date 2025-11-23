@@ -5,8 +5,10 @@ import type { ChromeProfile, Config } from '../shared/types';
 const DEFAULT_CONFIG: Config = {
   sessionsRoot: '',
   chromeExecutablePath: null,
+  chromeUserDataRoot: null,
   chromeUserDataDir: null,
   chromeActiveProfileName: null,
+  chromeProfileId: null,
   chromeClonedProfilesRoot: null,
   promptDelayMs: 1500,
   draftTimeoutMs: 30000,
@@ -30,6 +32,7 @@ const DEFAULT_CONFIG: Config = {
 const normalizeProfiles = (profilesList: ChromeProfile[]): ChromeProfile[] =>
   profilesList.map((p) => ({
     ...p,
+    id: (p as any).id ?? (p as any).profileDirectory ?? (p as any).profileDir ?? p.name,
     profileDirectory: (p as any).profileDirectory ?? (p as any).profileDir ?? p.name,
     profileDir: (p as any).profileDir ?? (p as any).profileDirectory ?? p.name,
   }));
@@ -130,8 +133,10 @@ export const SettingsPage: React.FC = () => {
     const payload: Partial<Config> = {
       ...draft,
       chromeExecutablePath: draft.chromeExecutablePath ?? null,
+      chromeUserDataRoot: draft.chromeUserDataRoot ?? null,
       chromeUserDataDir: draft.chromeUserDataDir ?? null,
       chromeActiveProfileName: draft.chromeActiveProfileName ?? null,
+      chromeProfileId: draft.chromeProfileId ?? null,
       ffmpegPath: draft.ffmpegPath ?? null,
       cleanup: draft.cleanup,
       telegram: draft.telegram,
@@ -234,8 +239,18 @@ export const SettingsPage: React.FC = () => {
     const updateActive = (await chromeApi?.setActiveProfile?.(name)) ?? (await chromeApi?.setActive?.(name));
     try {
       const list = extractProfiles(updateActive);
+      const selected = list.find((p) => p.name === name || p.profileDirectory === name || p.id === name);
       setProfiles(list);
-      setDraft((prev) => (prev ? ({ ...prev, chromeActiveProfileName: name } as Config) : prev));
+      setDraft((prev) =>
+        prev
+          ? ({
+              ...prev,
+              chromeActiveProfileName: selected?.name ?? name,
+              chromeProfileId: selected?.profileDirectory ?? name,
+              chromeUserDataRoot: selected?.userDataDir ?? prev.chromeUserDataRoot ?? null,
+            } as Config)
+          : prev
+      );
     } catch (error) {
       setScanError((error as Error).message);
     }
