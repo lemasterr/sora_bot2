@@ -23,9 +23,58 @@ type ChromeInstance = {
 
 const activeInstances = new Map<string, ChromeInstance>();
 
+function parsePidFromLock(lockPath: string): number | null {
+  try {
+    const target = fs.readlinkSync(lockPath);
+    const match = target.match(/(\d+)/);
+    if (match) return Number(match[1]);
+  } catch {
+    // not a symlink; fall through
+  }
+
+  try {
+    const content = fs.readFileSync(lockPath, 'utf8');
+    const match = content.match(/(\d+)/);
+    if (match) return Number(match[1]);
+  } catch {
+    // ignore read errors
+  }
+
+  return null;
+}
+
+function isPidRunning(pid: number): boolean {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (error) {
+    const code = (error as NodeJS.ErrnoException)?.code;
+    return !(code === 'ESRCH' || code === 'EPERM');
+  }
+}
+
 function isProfileDirInUse(userDataDir: string): boolean {
   const lockFiles = ['SingletonLock', 'SingletonCookie', 'SingletonSocket'];
-  return lockFiles.some((file) => fs.existsSync(path.join(userDataDir, file)));
+
+  for (const file of lockFiles) {
+    const lockPath = path.join(userDataDir, file);
+    if (!fs.existsSync(lockPath)) continue;
+
+    const pid = parsePidFromLock(lockPath);
+
+    if (pid !== null && isPidRunning(pid)) {
+      return true;
+    }
+
+    try {
+      fs.unlinkSync(lockPath);
+    } catch {
+      // If we cannot remove it, assume the profile is in use to stay safe
+      return true;
+    }
+  }
+
+  return false;
 }
 
 async function terminateSpawnedProcess(pid?: number): Promise<void> {
