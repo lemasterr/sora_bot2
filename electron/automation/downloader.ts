@@ -29,8 +29,15 @@ export type DownloadRunResult = {
   error?: string;
 };
 
-const CARD_SELECTOR = '.sora-draft-card';
-const DOWNLOAD_BUTTON_SELECTOR = "button[data-testid='download']";
+const CARD_SELECTOR = "a[href*='/d/']";
+const RIGHT_PANEL_SELECTOR = "div.absolute.right-0.top-0";
+const KEBAB_IN_RIGHT_PANEL_SELECTOR =
+  `${RIGHT_PANEL_SELECTOR} button[aria-haspopup='menu']:not([aria-label='Settings'])`;
+const MENU_ROOT_SELECTOR = "[role='menu']";
+const MENU_ITEM_SELECTOR = "[role='menuitem']";
+
+const DOWNLOAD_MENU_LABELS = ['Download', 'Скачать', 'Download video', 'Save video', 'Export'];
+
 const DEFAULT_CDP_PORT = 9222;
 const WATCHDOG_TIMEOUT_MS = 120_000;
 const MAX_WATCHDOG_RESTARTS = 2;
@@ -128,6 +135,53 @@ async function waitForDownload(page: Page, timeoutMs: number): Promise<void> {
 
     client.on('Page.downloadProgress', handler as never);
   });
+}
+
+async function openKebabMenu(page: Page): Promise<void> {
+  const kebab = await page.$(KEBAB_IN_RIGHT_PANEL_SELECTOR);
+  if (!kebab) {
+    throw new Error('Download menu button not found in right panel');
+  }
+
+  const box = await kebab.boundingBox();
+  if (box) {
+    await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+    await delay(150);
+  }
+
+  await kebab.click();
+  await page.waitForSelector(MENU_ROOT_SELECTOR, { timeout: 8000 });
+}
+
+async function clickDownloadInMenu(page: Page): Promise<void> {
+  const menuRoot = await page.$(MENU_ROOT_SELECTOR);
+  if (!menuRoot) {
+    throw new Error('Download menu root not found');
+  }
+
+  const items = await menuRoot.$$(MENU_ITEM_SELECTOR);
+  if (items.length === 0) {
+    throw new Error('No menu items found in download menu');
+  }
+
+  let candidate: any | null = null;
+
+  for (const item of items) {
+    const text = (await page.evaluate((el) => el.textContent ?? '', item)).trim();
+    for (const label of DOWNLOAD_MENU_LABELS) {
+      if (text.toLowerCase().includes(label.toLowerCase())) {
+        candidate = item;
+        break;
+      }
+    }
+    if (candidate) break;
+  }
+
+  if (!candidate) {
+    candidate = items[0];
+  }
+
+  await candidate.click();
 }
 
 async function findLatestMp4(downloadDir: string): Promise<string | null> {
@@ -230,10 +284,11 @@ export async function runDownloads(session: Session, maxVideos = 0): Promise<Dow
 
       try {
         await card.click();
-        await activePage.waitForSelector(DOWNLOAD_BUTTON_SELECTOR, { timeout: 60_000 });
+        await activePage.waitForSelector(RIGHT_PANEL_SELECTOR, { timeout: 60_000 });
 
         const downloadPromise = waitForDownload(page, config.downloadTimeoutMs);
-        await activePage.click(DOWNLOAD_BUTTON_SELECTOR);
+        await openKebabMenu(activePage);
+        await clickDownloadInMenu(activePage);
         await downloadPromise;
 
         const latest = await findLatestMp4(paths.downloadDir);
