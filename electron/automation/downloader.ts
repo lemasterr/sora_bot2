@@ -1,6 +1,6 @@
 import fs from 'fs/promises';
 import path from 'path';
-import puppeteer, { type Browser, type ElementHandle, type Page } from 'puppeteer-core';
+import puppeteer, { type Browser, type Page } from 'puppeteer-core';
 
 import { getConfig, type Config } from '../config/config';
 import { getSessionPaths } from '../sessions/repo';
@@ -204,47 +204,96 @@ async function findLatestMp4(downloadDir: string): Promise<string | null> {
   return latest?.file ?? null;
 }
 
-async function getDraftCards(page: Page): Promise<ElementHandle<Element>[]> {
-  const cards = await page.$$(CARD_SELECTOR);
-  return cards;
+async function getCurrentVideoSignature(page: Page): Promise<string> {
+  return page.evaluate(() => {
+    const video = document.querySelector('video') as HTMLVideoElement | null;
+    const src = video?.currentSrc || video?.src || '';
+    const path = window.location.pathname || '';
+    const poster = video?.getAttribute('poster') ?? '';
+    return `${path}::${src}::${poster}`;
+  });
 }
 
-async function openFirstDraftCard(page: Page): Promise<boolean> {
-  await page.waitForSelector(CARD_SELECTOR, { timeout: 60_000 }).catch(() => undefined);
-  const cards = await getDraftCards(page);
-  const first = cards[0];
-  if (!first) return false;
+async function longSwipeOnce(page: Page): Promise<void> {
+  const viewport = page.viewport() ?? { width: 1280, height: 720 };
 
-  await first.click();
-  await page.waitForNavigation({ waitUntil: 'networkidle2' }).catch(() => undefined);
-  await page.waitForSelector(RIGHT_PANEL_SELECTOR, { timeout: 60_000 }).catch(() => undefined);
-  return true;
+  try {
+    await page.mouse.move(viewport.width / 2, viewport.height * 0.35);
+  } catch {
+    // ignore
+  }
+
+  const wheel = async (delta: number): Promise<void> => {
+    try {
+      await page.mouse.wheel({ deltaY: delta });
+    } catch {
+      await page.evaluate((d) => {
+        window.scrollBy(0, d);
+      }, delta);
+    }
+  };
+
+  let performed = false;
+  for (let i = 0; i < 3; i += 1) {
+    await wheel(900);
+    performed = true;
+    await delay(160);
+  }
+
+  if (!performed) {
+    await wheel(2400);
+  }
+
+  await delay(820);
 }
 
-async function goToNextVideoLikeTikTok(page: Page): Promise<boolean> {
-  const previousUrl = page.url();
+async function scrollToNextCardInFeed(
+  page: Page,
+  pauseMs = 1800,
+  timeoutMs = 9000
+): Promise<boolean> {
+  const startUrl = page.url();
+  const startSig = await getCurrentVideoSignature(page);
 
-  const attempts: Array<() => Promise<void>> = [
-    async () => {
-      await page.evaluate(() => {
-        window.scrollBy(0, window.innerHeight * 0.9);
-      });
-    },
-    async () => {
-      await page.keyboard.press('PageDown').catch(() => undefined);
-    },
-    async () => {
-      await page.keyboard.press('ArrowDown').catch(() => undefined);
-    },
-  ];
+  const waitForChange = async (totalMs: number): Promise<boolean> => {
+    const deadline = Date.now() + totalMs;
+    while (Date.now() < deadline) {
+      const [url, sig] = await Promise.all([
+        Promise.resolve(page.url()),
+        getCurrentVideoSignature(page),
+      ]);
+      if (url !== startUrl || sig !== startSig) {
+        return true;
+      }
+      await delay(180);
+    }
+    const [finalUrl, finalSig] = await Promise.all([
+      Promise.resolve(page.url()),
+      getCurrentVideoSignature(page),
+    ]);
+    return finalUrl !== startUrl || finalSig !== startSig;
+  };
 
-  for (const attempt of attempts) {
-    await attempt();
-    await delay(1500);
-    const newUrl = page.url();
-    if (newUrl !== previousUrl) {
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    await longSwipeOnce(page);
+    if (await waitForChange(Math.floor(timeoutMs * 0.6))) {
+      try {
+        await page.waitForSelector(RIGHT_PANEL_SELECTOR, { timeout: 6500 });
+      } catch {
+        // ignore
+      }
       return true;
     }
+    await delay(Math.floor(pauseMs * 0.9));
+  }
+
+  if (await waitForChange(Math.floor(timeoutMs * 0.9))) {
+    try {
+      await page.waitForSelector(RIGHT_PANEL_SELECTOR, { timeout: 6500 });
+    } catch {
+      // ignore
+    }
+    return true;
   }
 
   return false;
@@ -317,19 +366,24 @@ export async function runDownloads(
     const hardCap = explicitCap > 0 ? explicitCap : fallbackCap;
 
     const draftsUrl = 'https://sora.chatgpt.com/drafts';
-    const seenHrefs = new Set<string>();
+    const seenUrls = new Set<string>();
 
-    // Open drafts once and enter the viewer on the first card
     if (page) {
       assertPage(page);
       const activePage: Page = page;
 
-      await activePage.goto(draftsUrl, { waitUntil: 'networkidle2' });
-      const opened = await openFirstDraftCard(activePage);
-      if (!opened) {
-        logInfo('downloader', 'No draft cards found to start downloads');
+      await activePage.goto(draftsUrl, { waitUntil: 'networkidle2' }).catch(() => undefined);
+      await activePage.waitForSelector(CARD_SELECTOR, { timeout: 60_000 }).catch(() => undefined);
+
+      const cards = await activePage.$$(CARD_SELECTOR);
+      if (cards.length === 0) {
+        logInfo('downloader', `No draft cards found in drafts for session ${session.name}`);
         return { ok: true, downloaded };
       }
+
+      await cards[0].click();
+      await activePage.waitForNavigation({ waitUntil: 'networkidle2' }).catch(() => undefined);
+      await activePage.waitForSelector(RIGHT_PANEL_SELECTOR, { timeout: 60_000 }).catch(() => undefined);
     }
 
     while (!fatalWatchdog && !cancelFlag.cancelled) {
@@ -344,27 +398,20 @@ export async function runDownloads(
       assertPage(page);
       const activePage: Page = page;
 
-      if (activePage.url().startsWith(draftsUrl)) {
-        const opened = await openFirstDraftCard(activePage);
-        if (!opened) {
-          logInfo('downloader', 'No draft cards found after returning to drafts');
-          break;
-        }
-      }
-
       const currentUrl = activePage.url();
-
-      if (seenHrefs.has(currentUrl)) {
-        const moved = await goToNextVideoLikeTikTok(activePage);
+      if (seenUrls.has(currentUrl)) {
+        const moved = await scrollToNextCardInFeed(activePage);
         if (!moved) {
-          logInfo('downloader', 'No next video after scroll, stopping.');
+          logInfo('downloader', '[Feed] Current card URL already seen, stopping.');
           break;
         }
         continue;
       }
-      seenHrefs.add(currentUrl);
+      seenUrls.add(currentUrl);
 
-      const title = titles[downloaded] || `video_${downloaded + 1}`;
+      const titleFromList = titles[downloaded];
+      const titleFromPage = (await activePage.title()) || '';
+      const title = titleFromList || titleFromPage || `video_${downloaded + 1}`;
 
       try {
         await activePage.waitForSelector(RIGHT_PANEL_SELECTOR, { timeout: 60_000 });
@@ -385,18 +432,24 @@ export async function runDownloads(
         }
 
         downloaded += 1;
+        logInfo('downloader', `[Feed] Downloaded ${downloaded} videos for session ${session.name}`);
       } catch (error) {
-        logInfo('downloader', '[Download] Error during card download');
+        logInfo('downloader', `[Feed] Error during card download: ${(error as Error)?.message ?? String(error)}`);
       }
 
-      const moved = await goToNextVideoLikeTikTok(activePage);
+      if (hardCap > 0 && downloaded >= hardCap) {
+        logInfo('downloader', `Reached download limit ${hardCap} for session ${session.name}`);
+        break;
+      }
+
+      const moved = await scrollToNextCardInFeed(activePage);
       if (!moved) {
-        logInfo('downloader', 'No next video after scroll, stopping.');
+        logInfo('downloader', '[Feed] Could not scroll to next card — stopping.');
         break;
       }
 
       heartbeat(runId);
-      await delay(1000);
+      await delay(600);
     }
 
     if (fatalWatchdog) {
