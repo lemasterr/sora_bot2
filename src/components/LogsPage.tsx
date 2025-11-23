@@ -18,20 +18,19 @@ export function LogsPage() {
   const [apiError, setApiError] = useState<string | null>(null);
 
   useEffect(() => {
-    const loggingApi = (window as any).electronAPI?.logging;
-    if (!loggingApi?.onLog) {
+    const api = (window as any).electronAPI;
+    const logsApi = api?.logs;
+    if (!logsApi?.subscribe) {
       setApiError('Logging API is not available. Please run the Sora desktop app.');
       return;
     }
 
-    let cancelled = false;
-    loggingApi.onLog((entry: AppLogEntry) => {
-      if (cancelled) return;
+    const unsubscribe = logsApi.subscribe((entry: AppLogEntry) => {
       setLogs((prev) => [...prev.slice(-900), entry]);
     });
 
     return () => {
-      cancelled = true;
+      unsubscribe?.();
     };
   }, []);
 
@@ -62,31 +61,19 @@ export function LogsPage() {
 
   const exportLogs = async () => {
     setExportMessage('');
-    const loggingApi = (window as any).electronAPI?.logging;
-    const systemApi = (window as any).electronAPI?.system;
-    if (loggingApi?.export) {
-      const result = await loggingApi.export();
-      if (result?.ok) {
-        setExportMessage(`Exported to ${result.path}`);
-      } else if (result?.error && result.error !== 'cancelled') {
-        setExportMessage(result.error || 'Export failed');
-      } else {
-        setExportMessage('Export cancelled or unavailable.');
-      }
+    const api = (window as any).electronAPI;
+    const logsApi = api?.logs;
+    if (!logsApi?.export) {
+      setExportMessage('Export is not available: Electron backend is missing.');
       return;
     }
 
-    if (systemApi?.openLogs) {
-      const result = await systemApi.openLogs();
-      if (result?.ok) {
-        setExportMessage('Opening logs folder…');
-      } else if (result?.error && result.error !== 'cancelled') {
-        setExportMessage(result.error || 'Unable to open logs folder');
-      }
-      return;
+    const result: any = await logsApi.export();
+    if (result?.ok === false) {
+      setExportMessage(result.error || 'Failed to export logs');
+    } else {
+      setExportMessage('Opened logs folder.');
     }
-
-    setExportMessage('Logging API is not available in this environment.');
   };
 
   return (

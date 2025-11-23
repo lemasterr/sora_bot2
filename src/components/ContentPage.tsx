@@ -80,7 +80,8 @@ export const ContentPage: React.FC = () => {
       setError(null);
       setStatus(null);
       try {
-        const sessionFilesApi = (window as any).electronAPI?.sessionFiles ?? (window as any).electronAPI?.files;
+        const api = (window as any).electronAPI;
+        const sessionFilesApi = api?.sessionFiles ?? api?.files;
         if (!sessionFilesApi?.read) {
           setError('Session files API is not available. Please run inside the Electron app.');
           setLoading(false);
@@ -128,10 +129,16 @@ export const ContentPage: React.FC = () => {
     setError(null);
     try {
       const payload = toArrays(values);
-      const saveFn = window.electronAPI.sessionFiles?.save ?? window.electronAPI.files.save;
+      const api = (window as any).electronAPI;
+      const saveFn = api?.sessionFiles?.save ?? api?.files?.save;
+      if (!saveFn) {
+        setError('Session files API is not available. Please run inside the Electron app.');
+        setSaving(false);
+        return;
+      }
       const result = await saveFn(selectedProfile, payload);
-      if (!result.ok) {
-        setError(result.error || 'Failed to save files');
+      if (!result?.ok) {
+        setError(result?.error || 'Failed to save files');
       } else {
         setStatus('Saved successfully');
       }
@@ -204,7 +211,11 @@ export const ContentPage: React.FC = () => {
                 try {
                   const chromeApi = (window as any).electronAPI?.chrome;
                   if (!chromeApi?.scanProfiles) {
-                    throw new Error('Chrome API is not available. Please run the Electron app.');
+                    setError(
+                      'Chrome API is not available. Please run the Sora desktop app (Electron), not just the Vite dev URL.'
+                    );
+                    setScanning(false);
+                    return;
                   }
                   const result = await chromeApi.scanProfiles();
                   if (!result?.ok) throw new Error(result?.error || 'Scan failed');

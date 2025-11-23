@@ -148,9 +148,15 @@ export const SettingsPage: React.FC = () => {
 
   const loadProfiles = async () => {
     try {
-      const response =
-        (await window.electronAPI?.chrome?.listProfiles?.()) ??
-        (await window.electronAPI?.chrome?.scanProfiles?.());
+      const api = (window as any).electronAPI;
+      const chromeApi = api?.chrome;
+      if (!chromeApi) {
+        setScanError(
+          'Chrome API is not available. Please run the Sora desktop app (Electron), not just open the Vite dev URL.'
+        );
+        return;
+      }
+      const response = (await chromeApi?.listProfiles?.()) ?? (await chromeApi?.scanProfiles?.());
       const list = extractProfiles(response);
       setProfiles(list);
       setScanError('');
@@ -164,9 +170,16 @@ export const SettingsPage: React.FC = () => {
     setScanError('');
     setStatus('');
     try {
-      const response =
-        (await window.electronAPI?.chrome?.scan?.()) ??
-        (await window.electronAPI?.chrome?.scanProfiles?.());
+      const api = (window as any).electronAPI;
+      const chromeApi = api?.chrome;
+      if (!chromeApi) {
+        setScanError(
+          'Chrome API is not available. Please run the Sora desktop app (Electron), not just open the Vite dev URL.'
+        );
+        setScanning(false);
+        return;
+      }
+      const response = (await chromeApi?.scan?.()) ?? (await chromeApi?.scanProfiles?.());
       const list = extractProfiles(response);
       setProfiles(list);
       setStatus(
@@ -183,9 +196,13 @@ export const SettingsPage: React.FC = () => {
   };
 
   const setActiveProfile = async (name: string) => {
-    const updateActive =
-      (await window.electronAPI?.chrome?.setActiveProfile?.(name)) ??
-      (await window.electronAPI?.chrome?.setActive?.(name));
+    const api = (window as any).electronAPI;
+    const chromeApi = api?.chrome;
+    if (!chromeApi) {
+      setScanError('Chrome API is not available. Please run the Sora desktop app (Electron).');
+      return;
+    }
+    const updateActive = (await chromeApi?.setActiveProfile?.(name)) ?? (await chromeApi?.setActive?.(name));
     try {
       const list = extractProfiles(updateActive);
       setProfiles(list);
@@ -198,9 +215,13 @@ export const SettingsPage: React.FC = () => {
 
   const saveProfile = async (profile: ChromeProfile) => {
     try {
-      const response =
-        (await window.electronAPI?.chrome?.save?.(profile)) ??
-        (await window.electronAPI?.chrome?.scanProfiles?.());
+      const api = (window as any).electronAPI;
+      const chromeApi = api?.chrome;
+      if (!chromeApi) {
+        setScanError('Chrome API is not available. Please run the Sora desktop app (Electron).');
+        return;
+      }
+      const response = (await chromeApi?.save?.(profile)) ?? (await chromeApi?.scanProfiles?.());
       const list = extractProfiles(response);
       setProfiles(list);
       setEditingProfile(null);
@@ -212,9 +233,13 @@ export const SettingsPage: React.FC = () => {
 
   const removeProfile = async (name: string) => {
     try {
-      const response =
-        (await window.electronAPI?.chrome?.remove?.(name)) ??
-        (await window.electronAPI?.chrome?.scanProfiles?.());
+      const api = (window as any).electronAPI;
+      const chromeApi = api?.chrome;
+      if (!chromeApi) {
+        setScanError('Chrome API is not available. Please run the Sora desktop app (Electron).');
+        return;
+      }
+      const response = (await chromeApi?.remove?.(name)) ?? (await chromeApi?.scanProfiles?.());
       const list = extractProfiles(response);
       setProfiles(list);
     } catch (error) {

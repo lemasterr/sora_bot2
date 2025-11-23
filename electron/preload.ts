@@ -56,6 +56,18 @@ contextBridge.exposeInMainWorld('electronAPI', {
       return () => ipcRenderer.removeAllListeners('pipeline:progress');
     },
   },
+  logs: {
+    subscribe: (cb: (entry: unknown) => void) => {
+      const handler = (_event: unknown, entry: unknown) => {
+        cb(entry);
+      };
+      ipcRenderer.on('logging:push', handler);
+      return () => {
+        ipcRenderer.removeListener('logging:push', handler);
+      };
+    },
+    export: (): Promise<unknown> => safeInvoke('system:openLogs'),
+  },
   qa: {
     batchRun: (videoDir?: string): Promise<unknown> => safeInvoke('qa:batchRun', videoDir),
   },

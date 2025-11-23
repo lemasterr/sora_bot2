@@ -4,7 +4,9 @@
   "private": true,
   "main": "dist-electron/main.js",
   "scripts": {
-    "dev": "concurrently -k \"vite\" \"npm:electron\"",
+    "dev": "concurrently -k \"npm:dev:renderer\" \"npm:dev:electron\"",
+    "dev:renderer": "vite",
+    "dev:electron": "wait-on http://localhost:5173 && cross-env NODE_ENV=development TS_NODE_PROJECT=tsconfig.electron.json electron ./electron/dev-main.js",
     "electron": "wait-on http://localhost:5173 && cross-env NODE_ENV=development TS_NODE_PROJECT=tsconfig.electron.json electron ./electron/dev-main.js",
     "build": "npm run build:renderer && npm run build:electron && electron-builder",
     "build:renderer": "vite build",
