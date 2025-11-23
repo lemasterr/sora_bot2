@@ -122,7 +122,19 @@ async function ensureChromeWithCDP(profile: ChromeProfile, port: number): Promis
 
   child.unref();
 
-  await waitForEndpoint(endpoint);
+  try {
+    await waitForEndpoint(endpoint);
+  } catch (error) {
+    await terminateSpawnedProcess(child.pid);
+
+    const guidance =
+      'Chrome may already be running for this profile without remote debugging. ' +
+      'Close all Chrome windows for this profile and try "Start Chrome" again, or start Chrome manually with the ' +
+      `"--remote-debugging-port=${port}" flag.`;
+
+    const message = (error as Error)?.message;
+    throw new Error(message ? `${message}. ${guidance}` : guidance);
+  }
 
   console.info('[chrome] spawned browser for CDP', {
     executablePath,
