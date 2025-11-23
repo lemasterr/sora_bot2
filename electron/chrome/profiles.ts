@@ -106,13 +106,22 @@ function annotateActive(
 export async function resolveProfileLaunchTarget(
   profile: ChromeProfile
 ): Promise<{ userDataDir: string; profileDirectoryArg?: string }> {
-  // Restore the legacy launch shape used in the working build: point Puppeteer
-  // at the base userDataDir and hint the exact profile via --profile-directory.
-  // Passing the profile subfolder itself as user-data-dir resulted in Chrome
-  // treating it as a fresh default profile, which surfaced as blank sessions
-  // and fresh login prompts. The base + profile-directory combination keeps the
-  // real signed-in profile intact (cookies, history, Sora auth) while remaining
-  // compatible with the cached discovery data.
+  // Prefer launching directly against the profile directory (base + profile
+  // folder) so Chrome reuses the full cache/cookies for the chosen profile.
+  // If that directory does not exist for some reason, fall back to the base
+  // userDataDir with a --profile-directory hint (keeps compatibility with the
+  // cached discovery data).
+  const profilePath = path.join(profile.userDataDir, profile.profileDirectory);
+
+  try {
+    const stats = await fs.stat(profilePath);
+    if (stats.isDirectory()) {
+      return { userDataDir: profilePath, profileDirectoryArg: profile.profileDirectory };
+    }
+  } catch {
+    // ignore and fall back below
+  }
+
   return { userDataDir: profile.userDataDir, profileDirectoryArg: profile.profileDirectory };
 }
 
