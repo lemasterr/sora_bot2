@@ -2,7 +2,7 @@ import fs from 'fs/promises';
 import path from 'path';
 import type { Browser, Page } from 'puppeteer-core';
 
-import { launchBrowserForSession } from '../chrome/cdp';
+import { attachExistingChromeForProfile } from '../chrome/manager';
 import { resolveChromeProfileForSession } from '../chrome/profiles';
 import { getConfig, type Config } from '../config/config';
 import { getSessionPaths } from '../sessions/repo';
@@ -114,7 +114,7 @@ export async function runPrompts(session: Session): Promise<PromptsRunResult> {
       return { ok: false, submitted, failed, error: 'No Chrome profile available. Select a Chrome profile in Settings.' };
     }
 
-    browser = await launchBrowserForSession(profile, cdpPort);
+    browser = await attachExistingChromeForProfile(profile, cdpPort);
     const prepare = async () => {
       if (!browser) return;
       if (page) {
