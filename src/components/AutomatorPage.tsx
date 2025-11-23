@@ -20,8 +20,8 @@ const STEP_TYPES: { value: PipelineStepType; label: string }[] = [
 const createStep = (): UiStep => ({
   id: crypto.randomUUID(),
   type: 'session_prompts',
-  sessions: [],
-  limit: 1,
+  sessionIds: [],
+  limit: 0,
   group: ''
 });
 
@@ -32,7 +32,8 @@ export const AutomatorPage: React.FC = () => {
   const [status, setStatus] = useState<'idle' | 'running' | 'success' | 'error'>('idle');
   const [warning, setWarning] = useState<string>('');
 
-  const sessionOptions = useMemo(() => sessions.map((s) => s.name), [sessions]);
+  const sessionOptions = useMemo(() => sessions.map((s) => ({ id: s.id, name: s.name })), [sessions]);
+  const sessionNameById = useMemo(() => Object.fromEntries(sessionOptions.map((s) => [s.id, s.name])), [sessionOptions]);
   const statusColor =
     status === 'running' ? 'bg-blue-500' : status === 'success' ? 'bg-emerald-500' : status === 'error' ? 'bg-red-500' : 'bg-zinc-700';
 
@@ -42,7 +43,7 @@ export const AutomatorPage: React.FC = () => {
       return;
     }
     const unsubscribe = window.electronAPI.pipeline.onProgress((progress) => {
-      setLogs((prev) => [progress, ...prev].slice(0, 3));
+      setLogs((prev) => [progress as PipelineProgress, ...prev].slice(0, 3));
       if (progress.stepType === 'pipeline') {
         if (progress.status === 'running') setStatus('running');
         if (progress.status === 'success') setStatus('success');
@@ -63,7 +64,7 @@ export const AutomatorPage: React.FC = () => {
 
   const handleSessionsChange = (id: string, options: HTMLOptionElement[]) => {
     const selectedSessions = options.filter((opt) => opt.selected).map((opt) => opt.value);
-    updateStep(id, { sessions: selectedSessions });
+    updateStep(id, { sessionIds: selectedSessions });
   };
 
   const startPipeline = async () => {
@@ -80,8 +81,8 @@ export const AutomatorPage: React.FC = () => {
   };
 
   const stopPipeline = async () => {
-    if (!window.electronAPI?.pipeline?.stop) return;
-    await window.electronAPI.pipeline.stop();
+    if (!window.electronAPI?.pipeline?.cancel) return;
+    await window.electronAPI.pipeline.cancel();
     setStatus('idle');
   };
 
@@ -151,13 +152,13 @@ export const AutomatorPage: React.FC = () => {
                   <label className="text-xs uppercase tracking-wide text-zinc-400">Sessions</label>
                   <select
                     multiple
-                    value={step.sessions}
+                    value={step.sessionIds}
                     onChange={(e) => handleSessionsChange(step.id, Array.from(e.target.options))}
                     className="h-28 w-full rounded-md border border-zinc-700 bg-zinc-800 px-3 py-2 text-sm text-zinc-100 focus:border-blue-500 focus:outline-none"
                   >
-                    {sessionOptions.map((name) => (
-                      <option key={name} value={name}>
-                        {name}
+                    {sessionOptions.map((session) => (
+                      <option key={session.id} value={session.id}>
+                        {session.name}
                       </option>
                     ))}
                   </select>
@@ -170,8 +171,8 @@ export const AutomatorPage: React.FC = () => {
                       <label className="text-xs uppercase tracking-wide text-zinc-400">Max Downloads</label>
                       <input
                         type="number"
-                        min={1}
-                        value={step.limit ?? 1}
+                        min={0}
+                        value={step.limit ?? 0}
                         onChange={(e) => updateStep(step.id, { limit: Number(e.target.value) })}
                         className="w-full rounded-md border border-zinc-700 bg-zinc-800 px-3 py-2 text-sm text-zinc-100 focus:border-blue-500 focus:outline-none"
                       />
@@ -216,7 +217,9 @@ export const AutomatorPage: React.FC = () => {
               </div>
               <div className="text-blue-400">{log.stepType}</div>
               <div className="text-zinc-100">{log.message}</div>
-              {log.session && <div className="text-emerald-400">{log.session}</div>}
+              {log.session && (
+                <div className="text-emerald-400">{sessionNameById[log.session] ?? log.session}</div>
+              )}
             </div>
           ))}
         </div>

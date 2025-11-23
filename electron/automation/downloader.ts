@@ -176,16 +176,18 @@ export async function runDownloads(session: Session, maxVideos: number): Promise
     await prepare();
     startWatchdog(runId, WATCHDOG_TIMEOUT_MS, onTimeout);
 
-    const limit = (count: number) =>
-      Math.min(count, titles.length, Number.isFinite(maxVideos) && maxVideos > 0 ? maxVideos : Number.POSITIVE_INFINITY);
+    const hardCap = Number.isFinite(maxVideos) && maxVideos > 0 ? maxVideos : 0;
 
     for (let index = 0; !fatalWatchdog; index += 1) {
       if (cancelFlag.cancelled) break;
       if (!page) break;
 
+      if (hardCap > 0 && downloaded >= hardCap) break;
+
       heartbeat(runId);
       const cards = await page.$$(CARD_SELECTOR);
-      if (cards.length === 0 || index >= limit(cards.length)) break;
+      const maxCount = Math.min(cards.length, titles.length, hardCap > 0 ? hardCap : Number.POSITIVE_INFINITY);
+      if (cards.length === 0 || index >= maxCount) break;
 
       const card = cards[index];
       const title = titles[index] || `video_${index + 1}`;

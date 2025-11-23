@@ -115,11 +115,21 @@ handle('sessions:runDownloads', async (id: string, maxVideos?: number) => {
 handle('sessions:cancelDownloads', async (id: string) => cancelDownloads(id));
 
 handle('pipeline:run', async (steps) => {
-  const safeSteps = Array.isArray(steps) ? steps : [];
+  const safeSteps = Array.isArray(steps)
+    ? steps.map((step) => ({
+        type: step?.type,
+        sessionIds: Array.isArray(step?.sessionIds) ? step.sessionIds : [],
+        limit: typeof step?.limit === 'number' ? step.limit : undefined,
+        group: typeof step?.group === 'string' ? step.group : undefined,
+      }))
+    : [];
   await runPipeline(safeSteps, (status) => mainWindow?.webContents.send('pipeline:progress', status));
   return { ok: true };
 });
-handle('pipeline:cancel', async () => cancelPipeline());
+handle('pipeline:cancel', async () => {
+  cancelPipeline();
+  return { ok: true };
+});
 
 handle('video:extractPreviewFrames', async (videoPath: string, count: number) => extractPreviewFrames(videoPath, count));
 handle('video:pickSmartPreviewFrames', async (videoPath: string, count: number) => pickSmartPreviewFrames(videoPath, count));

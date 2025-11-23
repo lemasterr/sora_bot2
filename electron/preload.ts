@@ -49,13 +49,6 @@ contextBridge.exposeInMainWorld('electronAPI', {
   },
   pipeline: {
     run: (steps: unknown): Promise<unknown> => safeInvoke('pipeline:run', steps),
-    dryRun: (steps: unknown): Promise<unknown> => safeInvoke('pipeline:dryRun', steps),
-    listPresets: (): Promise<unknown> => safeInvoke('pipeline:listPresets'),
-    savePreset: (preset: unknown): Promise<unknown> => safeInvoke('pipeline:savePreset', preset),
-    deletePreset: (name: string): Promise<unknown> => safeInvoke('pipeline:deletePreset', name),
-    listSchedules: (): Promise<unknown> => safeInvoke('pipeline:listSchedules'),
-    saveSchedule: (schedule: unknown): Promise<unknown> => safeInvoke('pipeline:saveSchedule', schedule),
-    deleteSchedule: (id: string): Promise<unknown> => safeInvoke('pipeline:deleteSchedule', id),
     cancel: (): Promise<unknown> => safeInvoke('pipeline:cancel'),
     onProgress: (cb: (status: unknown) => void) => {
       ipcRenderer.removeAllListeners('pipeline:progress');

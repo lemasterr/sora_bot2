@@ -151,17 +151,18 @@ export type PipelineStepType =
   | 'pipeline';
 
 export interface PipelineStep {
+  id?: string; // optional client-side identifier
   type: PipelineStepType;
-  sessions?: string[];
+  sessionIds?: string[];
   limit?: number;
   group?: string;
 }
 
 export interface PipelineProgress {
-  stepIndex: number;
+  stepIndex: number; // -1 reserved for pipeline-level events
   stepType: PipelineStepType;
   status: 'running' | 'success' | 'error';
   message: string;
   session?: string;
-  timestamp?: number;
+  timestamp: number;
 }
