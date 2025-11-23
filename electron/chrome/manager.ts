@@ -86,6 +86,17 @@ async function waitForEndpoint(endpoint: string, timeoutMs = 15000): Promise<voi
 
 type LaunchInfo = { endpoint: string; alreadyRunning: boolean; childPid?: number };
 
+async function readDevToolsActivePort(userDataDir: string): Promise<number | null> {
+  const activePortFile = path.join(userDataDir, 'DevToolsActivePort');
+  try {
+    const content = await fs.promises.readFile(activePortFile, 'utf8');
+    const port = Number(content.trim().split(/\s+/)[0]);
+    return Number.isFinite(port) ? port : null;
+  } catch {
+    return null;
+  }
+}
+
 async function ensureChromeWithCDP(profile: ChromeProfile, port: number): Promise<LaunchInfo> {
   const endpoint = `http://${CDP_HOST}:${port}`;
   if (await isEndpointAvailable(endpoint)) {
@@ -99,6 +110,18 @@ async function ensureChromeWithCDP(profile: ChromeProfile, port: number): Promis
   });
 
   const { userDataDir, profileDirectoryArg } = await resolveProfileLaunchTarget(profile);
+
+  const activePort = await readDevToolsActivePort(userDataDir);
+  if (activePort) {
+    const activeEndpoint = `http://${CDP_HOST}:${activePort}`;
+    if (await isEndpointAvailable(activeEndpoint)) {
+      console.info('[chrome] detected existing DevTools port for profile', {
+        activeEndpoint,
+        requestedPort: port,
+      });
+      return { endpoint: activeEndpoint, alreadyRunning: true };
+    }
+  }
 
   if (!fs.existsSync(userDataDir)) {
     throw new Error(`Chrome profile directory not found at ${userDataDir}. Please re-select the profile in Settings.`);
@@ -190,7 +213,7 @@ export async function getOrLaunchChromeForProfile(profile: ChromeProfile, port: 
     key,
     browser,
     endpoint,
-    port,
+    port: Number(new URL(endpoint).port),
     userDataDir: profile.userDataDir,
     profileDirectory: profile.profileDirectory ?? profile.profileDir ?? 'Default',
     spawned: !alreadyRunning,
@@ -225,10 +248,26 @@ export async function attachExistingChromeForProfile(
     return existing.browser;
   }
 
+  const { userDataDir } = await resolveProfileLaunchTarget(profile);
   const endpoint = `http://${CDP_HOST}:${port}`;
 
   // ВАЖНО: здесь НЕ спавним Chrome, только проверяем наличие CDP
+  let targetEndpoint = endpoint;
   if (!(await isEndpointAvailable(endpoint))) {
+    const activePort = await readDevToolsActivePort(userDataDir);
+    if (activePort) {
+      const activeEndpoint = `http://${CDP_HOST}:${activePort}`;
+      if (await isEndpointAvailable(activeEndpoint)) {
+        targetEndpoint = activeEndpoint;
+        console.info('[chrome] attaching to detected DevTools port for profile', {
+          activeEndpoint,
+          requestedPort: port,
+        });
+      }
+    }
+  }
+
+  if (!(await isEndpointAvailable(targetEndpoint))) {
     throw new Error(
       `Chrome is not running with remote debugging on port ${port}. ` +
         `Start Chrome for this session first (Start Chrome) or launch Chrome manually with "--remote-debugging-port=${port}".`
@@ -236,7 +275,7 @@ export async function attachExistingChromeForProfile(
   }
 
   const browser = (await puppeteer.connect({
-    browserURL: endpoint,
+    browserURL: targetEndpoint,
     defaultViewport: null,
   })) as Browser & { __soraAlreadyRunning?: boolean; __soraManaged?: boolean };
 
@@ -247,8 +286,8 @@ export async function attachExistingChromeForProfile(
   activeInstances.set(key, {
     key,
     browser,
-    endpoint,
-    port,
+    endpoint: targetEndpoint,
+    port: Number(new URL(targetEndpoint).port),
     userDataDir: profile.userDataDir,
     profileDirectory: profile.profileDirectory ?? profile.profileDir ?? 'Default',
     spawned: false,
@@ -263,7 +302,7 @@ export async function attachExistingChromeForProfile(
   });
 
   console.info('[chrome] attached to existing Chrome', {
-    endpoint,
+    endpoint: targetEndpoint,
     userDataDir: profile.userDataDir,
     profileDirectory: profile.profileDirectory ?? profile.profileDir ?? 'Default',
   });
