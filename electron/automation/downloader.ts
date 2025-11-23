@@ -262,7 +262,9 @@ export async function runDownloads(session: Session, maxVideos = 0): Promise<Dow
     const fallbackCap = Number.isFinite(session.maxVideos) && session.maxVideos > 0 ? session.maxVideos : 0;
     const hardCap = explicitCap > 0 ? explicitCap : fallbackCap;
 
-    for (let index = 0; !fatalWatchdog; index += 1) {
+    let noMoreCards = false;
+
+    for (let index = 0; !fatalWatchdog && !noMoreCards; index += 1) {
       if (cancelFlag.cancelled) break;
       if (!page) break;
 
@@ -274,10 +276,37 @@ export async function runDownloads(session: Session, maxVideos = 0): Promise<Dow
       heartbeat(runId);
       assertPage(page);
       const activePage = page as any;
-      const cards = await activePage.$$(CARD_SELECTOR);
+      if (!activePage.url().startsWith('https://sora.chatgpt.com/drafts')) {
+        await activePage.goto('https://sora.chatgpt.com/drafts', { waitUntil: 'networkidle2' });
+        await activePage.waitForSelector(CARD_SELECTOR, { timeout: 60_000 }).catch(() => undefined);
+      }
+
+      let cards = await activePage.$$(CARD_SELECTOR);
       const remaining = hardCap > 0 ? Math.max(hardCap - downloaded, 0) : Number.POSITIVE_INFINITY;
-      const maxCount = Math.min(cards.length, titles.length, remaining);
-      if (cards.length === 0 || index >= maxCount) break;
+      if (remaining <= 0) break;
+
+      let stagnantScrolls = 0;
+      while (index >= cards.length) {
+        const prevCount = cards.length;
+        await activePage.evaluate(() => {
+          const height = window.innerHeight || 800;
+          window.scrollBy(0, Math.floor(height * 0.8));
+        });
+        await delay(1200);
+        cards = await activePage.$$(CARD_SELECTOR);
+        if (cards.length > prevCount) {
+          stagnantScrolls = 0;
+        } else {
+          stagnantScrolls += 1;
+          if (stagnantScrolls >= 3) {
+            noMoreCards = true;
+            break;
+          }
+        }
+      }
+
+      if (noMoreCards) break;
+      if (cards.length === 0 || index >= cards.length) break;
 
       const card = cards[index];
       const title = titles[index] || `video_${index + 1}`;
@@ -302,8 +331,18 @@ export async function runDownloads(session: Session, maxVideos = 0): Promise<Dow
         }
 
         downloaded += 1;
+        await activePage.goto('https://sora.chatgpt.com/drafts', { waitUntil: 'networkidle2' });
+        await activePage.waitForSelector(CARD_SELECTOR, { timeout: 60_000 }).catch(() => undefined);
       } catch (error) {
         // Continue to next card on error
+        try {
+          if (!activePage.url().startsWith('https://sora.chatgpt.com/drafts')) {
+            await activePage.goto('https://sora.chatgpt.com/drafts', { waitUntil: 'networkidle2' });
+            await activePage.waitForSelector(CARD_SELECTOR, { timeout: 60_000 }).catch(() => undefined);
+          }
+        } catch {
+          // ignore navigation errors
+        }
       }
 
       heartbeat(runId);
