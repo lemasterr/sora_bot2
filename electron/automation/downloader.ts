@@ -13,6 +13,15 @@ import { ensureDir } from '../utils/fs';
 import { logInfo } from '../logging/logger';
 import { ensureBrowserForSession } from './sessionChrome';
 
+enum DownloadState {
+  Idle = 'idle',
+  WaitCardReady = 'wait_card_ready',
+  StartDownload = 'start_download',
+  WaitDownloadStart = 'wait_download_start',
+  WaitFileSaved = 'wait_file_saved',
+  SwipeNext = 'swipe_next',
+}
+
 function delay(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
@@ -101,22 +110,23 @@ async function preparePage(browser: Browser, downloadDir: string): Promise<Page>
   return page;
 }
 
-async function waitForDownload(page: Page, timeoutMs: number): Promise<void> {
+async function waitForDownloadStart(page: Page, timeoutMs: number): Promise<boolean> {
   const client = await page.target().createCDPSession();
+  await client.send('Page.enable').catch(() => undefined);
 
-  return new Promise<void>((resolve, reject) => {
+  return new Promise<boolean>((resolve) => {
     const timeout = setTimeout(() => {
       cleanup();
-      reject(new Error('Download timed out'));
+      resolve(false);
     }, timeoutMs);
 
     const handler = (event: { state?: string }) => {
-      if (event.state === 'completed') {
+      if (event.state === 'inProgress' || event.state === 'completed') {
         cleanup();
-        resolve();
+        resolve(true);
       } else if (event.state === 'canceled') {
         cleanup();
-        reject(new Error('Download canceled'));
+        resolve(false);
       }
     };
 
@@ -127,6 +137,42 @@ async function waitForDownload(page: Page, timeoutMs: number): Promise<void> {
 
     client.on('Page.downloadProgress', handler as never);
   });
+}
+
+async function waitUntilFileSavedOrTimeout(
+  downloadDir: string,
+  startedAt: number,
+  timeoutMs: number
+): Promise<string | null> {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    try {
+      const entries = await fs.readdir(downloadDir);
+      const mp4s = await Promise.all(
+        entries
+          .filter((name) => name.toLowerCase().endsWith('.mp4'))
+          .map(async (name) => ({
+            name,
+            full: path.join(downloadDir, name),
+            stats: await fs.stat(path.join(downloadDir, name)),
+          }))
+      );
+
+      const candidate = mp4s
+        .filter((entry) => entry.stats.mtimeMs >= startedAt)
+        .sort((a, b) => b.stats.mtimeMs - a.stats.mtimeMs)[0];
+
+      if (candidate) {
+        return candidate.full;
+      }
+    } catch {
+      // ignore polling errors
+    }
+
+    await delay(300);
+  }
+
+  return null;
 }
 
 async function openKebabMenu(page: Page): Promise<void> {
@@ -176,23 +222,15 @@ async function clickDownloadInMenu(page: Page): Promise<void> {
   await candidate.click();
 }
 
-async function findLatestMp4(downloadDir: string): Promise<string | null> {
-  const entries = await fs.readdir(downloadDir, { withFileTypes: true });
-  let latest: { file: string; mtime: number } | null = null;
+async function waitUntilCardReady(page: Page): Promise<void> {
+  await page.waitForSelector(RIGHT_PANEL_SELECTOR, { timeout: 60_000 });
+  // give the player a brief moment to settle before interacting
+  await delay(250);
+}
 
-  for (const entry of entries) {
-    if (!entry.isFile()) continue;
-    if (!entry.name.toLowerCase().endsWith('.mp4')) continue;
-
-    const fullPath = path.join(downloadDir, entry.name);
-    const stats = await fs.stat(fullPath);
-
-    if (!latest || stats.mtimeMs > latest.mtime) {
-      latest = { file: fullPath, mtime: stats.mtimeMs };
-    }
-  }
-
-  return latest?.file ?? null;
+async function startDownloadForCurrentCard(page: Page): Promise<void> {
+  await openKebabMenu(page);
+  await clickDownloadInMenu(page);
 }
 
 async function getCurrentVideoSignature(page: Page): Promise<string> {
@@ -415,28 +453,66 @@ export async function runDownloads(
       const titleFromPage = (await activePage.title()) || '';
       const title = titleFromList || titleFromPage || `video_${downloaded + 1}`;
 
-      try {
-        await activePage.waitForSelector(RIGHT_PANEL_SELECTOR, { timeout: 60_000 });
+      let state: DownloadState = DownloadState.WaitCardReady;
+      let attempts = 0;
+      const maxAttempts = 2;
+      let savedPath: string | null = null;
 
-        const downloadPromise = waitForDownload(activePage, config.downloadTimeoutMs);
-        await openKebabMenu(activePage);
-        await clickDownloadInMenu(activePage);
-        await downloadPromise;
+      while (attempts < maxAttempts && !cancelFlag.cancelled) {
+        try {
+          await waitUntilCardReady(activePage);
+          state = DownloadState.StartDownload;
+          const startedAt = Date.now();
 
-        const latest = await findLatestMp4(paths.downloadDir);
-        if (latest) {
-          const targetName = `${safeFileName(title)}.mp4`;
-          const targetPath = path.join(paths.downloadDir, targetName);
-          if (latest !== targetPath) {
-            await fs.rename(latest, targetPath);
+          await startDownloadForCurrentCard(activePage);
+
+          state = DownloadState.WaitDownloadStart;
+          const downloadStarted = await waitForDownloadStart(
+            activePage,
+            Math.min(Math.max(config.downloadTimeoutMs / 3, 5000), config.downloadTimeoutMs)
+          );
+          if (!downloadStarted) {
+            throw new Error('Download did not start');
           }
-          await runPostDownloadHook(targetPath, title);
+
+          state = DownloadState.WaitFileSaved;
+          savedPath = await waitUntilFileSavedOrTimeout(paths.downloadDir, startedAt, config.downloadTimeoutMs);
+          if (!savedPath) {
+            throw new Error('Download file not saved before timeout');
+          }
+
+          break;
+        } catch (error) {
+          attempts += 1;
+          const message = (error as Error)?.message ?? String(error);
+          logInfo(
+            'downloader',
+            `[Feed] Download attempt ${attempts}/${maxAttempts} failed at state ${state}: ${message}`
+          );
+          if (attempts >= maxAttempts) break;
+          await delay(800);
+        }
+      }
+
+      if (savedPath) {
+        const targetName = `${safeFileName(title)}.mp4`;
+        const targetPath = path.join(paths.downloadDir, targetName);
+        if (savedPath !== targetPath) {
+          try {
+            await fs.rename(savedPath, targetPath);
+          } catch {
+            // fallback: keep original path
+          }
         }
 
+        const finalPath = fs
+          .access(targetPath)
+          .then(() => targetPath)
+          .catch(() => savedPath ?? targetPath);
+
+        await runPostDownloadHook(await finalPath, title);
         downloaded += 1;
         logInfo('downloader', `[Feed] Downloaded ${downloaded} videos for session ${session.name}`);
-      } catch (error) {
-        logInfo('downloader', `[Feed] Error during card download: ${(error as Error)?.message ?? String(error)}`);
       }
 
       if (hardCap > 0 && downloaded >= hardCap) {
