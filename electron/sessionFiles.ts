@@ -1,7 +1,7 @@
 import fs from 'fs/promises';
 import path from 'path';
-import type { ManagedSession, SessionFiles } from '../shared/types';
-import { loadConfig } from './config';
+import type { Config, ManagedSession, SessionFiles } from '../shared/types';
+import { getConfig } from './config/config';
 
 const ensureFilePath = (session: ManagedSession, key: keyof Pick<ManagedSession, 'promptsFile' | 'imagePromptsFile' | 'titlesFile'>): string => {
   const value = session[key];
@@ -29,7 +29,7 @@ const writeLines = async (filePath: string, lines: string[]): Promise<void> => {
 };
 
 const getSession = async (sessionId: string): Promise<ManagedSession> => {
-  const config = await loadConfig();
+  const config = (await getConfig()) as Config;
   const session = (config.sessions ?? []).find((s) => s.id === sessionId);
   if (!session) {
     throw new Error('Session not found');

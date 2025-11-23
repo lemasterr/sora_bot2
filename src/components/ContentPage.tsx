@@ -51,7 +51,7 @@ export const ContentPage: React.FC = () => {
         const nextProfiles = (profileResult.profiles as ChromeProfile[]) ?? [];
         setProfiles(nextProfiles);
 
-        const activeName = (config as any)?.activeChromeProfile ?? (config as any)?.chromeActiveProfileName;
+        const activeName = (config as any)?.chromeActiveProfileName ?? (config as any)?.activeChromeProfile ?? null;
         const fallback = nextProfiles[0]?.name ?? '';
         setSelectedProfile(activeName || fallback || '');
       } catch (err) {

@@ -4,16 +4,27 @@ import type { ChromeProfile, Config } from '../shared/types';
 
 const DEFAULT_CONFIG: Config = {
   sessionsRoot: '',
-  chromeExecutablePath: '',
-  chromeUserDataDir: '',
-  ffmpegPath: '',
+  chromeExecutablePath: null,
+  chromeUserDataDir: null,
+  chromeActiveProfileName: null,
   promptDelayMs: 1500,
   draftTimeoutMs: 30000,
   downloadTimeoutMs: 60000,
   maxParallelSessions: 1,
-  activeChromeProfile: '',
+  ffmpegPath: null,
+  cleanup: {
+    enabled: true,
+    dryRun: false,
+    retentionDaysDownloads: 14,
+    retentionDaysBlurred: 30,
+    retentionDaysTemp: 3,
+  },
+  telegram: {
+    enabled: false,
+    botToken: null,
+    chatId: null,
+  },
 };
-
 
 const normalizeProfiles = (profilesList: ChromeProfile[]): ChromeProfile[] =>
   profilesList.map((p) => ({
@@ -37,19 +48,52 @@ export const SettingsPage: React.FC = () => {
       ? {
           ...DEFAULT_CONFIG,
           ...config,
-          activeChromeProfile:
-            (config as any).activeChromeProfile ?? (config as any).chromeActiveProfileName ?? (config as any).chromeActiveProfile,
+          chromeActiveProfileName:
+            (config as any).chromeActiveProfileName ?? (config as any).activeChromeProfile ?? null,
+          cleanup: {
+            ...DEFAULT_CONFIG.cleanup,
+            ...(config.cleanup ?? {}),
+          },
+          telegram: {
+            ...DEFAULT_CONFIG.telegram,
+            ...(config.telegram ?? {}),
+          },
         }
       : DEFAULT_CONFIG;
-    setDraft(normalized);
+    setDraft(normalized as Config);
     if ((normalized as any)?.chromeProfiles) {
-      setProfiles((normalized as any).chromeProfiles);
+      setProfiles(normalizeProfiles((normalized as any).chromeProfiles));
     }
   }, [config]);
 
   const updateField = (key: keyof Config, value: string | number | boolean) => {
     if (!draft) return;
     setDraft({ ...draft, [key]: value } as Config);
+  };
+
+  const updateCleanup = (
+    key: keyof NonNullable<Config['cleanup']>,
+    value: string | number | boolean | null
+  ) => {
+    if (!draft) return;
+    setDraft({
+      ...draft,
+      cleanup: {
+        ...(draft.cleanup ?? {}),
+        [key]: value,
+      },
+    } as Config);
+  };
+
+  const updateTelegram = (key: keyof Config['telegram'], value: string | boolean | null) => {
+    if (!draft) return;
+    setDraft({
+      ...draft,
+      telegram: {
+        ...(draft.telegram ?? DEFAULT_CONFIG.telegram),
+        [key]: value,
+      },
+    } as Config);
   };
 
   const extractProfiles = (result: any): ChromeProfile[] => {
@@ -82,12 +126,17 @@ export const SettingsPage: React.FC = () => {
       setStatus('Config API unavailable');
       return;
     }
-    const payload: any = {
+    const payload: Partial<Config> = {
       ...draft,
-      chromeActiveProfileName: (draft as any).activeChromeProfile ?? null,
+      chromeExecutablePath: draft.chromeExecutablePath ?? null,
+      chromeUserDataDir: draft.chromeUserDataDir ?? null,
+      chromeActiveProfileName: draft.chromeActiveProfileName ?? null,
+      ffmpegPath: draft.ffmpegPath ?? null,
+      cleanup: draft.cleanup,
+      telegram: draft.telegram,
     };
-    const updated = await update(payload);
-    setConfig(updated as any);
+    const updated = await update(payload as Config);
+    setConfig(updated as Config);
     setStatus('Saved');
   };
 
@@ -141,7 +190,7 @@ export const SettingsPage: React.FC = () => {
     try {
       const list = extractProfiles(updateActive);
       setProfiles(list);
-      setDraft((prev) => (prev ? ({ ...prev, activeChromeProfile: name } as Config) : prev));
+      setDraft((prev) => (prev ? ({ ...prev, chromeActiveProfileName: name } as Config) : prev));
     } catch (error) {
       setScanError((error as Error).message);
     }
@@ -229,7 +278,7 @@ export const SettingsPage: React.FC = () => {
           <div className="space-y-2">
             <label className="text-xs text-zinc-400">Chrome executable</label>
             <input
-              value={draft.chromeExecutablePath}
+              value={draft.chromeExecutablePath ?? ''}
               onChange={(e) => updateField('chromeExecutablePath', e.target.value)}
               className="w-full rounded-lg border border-zinc-700 bg-zinc-950 px-3 py-2 text-sm text-zinc-100 focus:border-blue-500 focus:outline-none"
               placeholder="/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"
@@ -247,7 +296,7 @@ export const SettingsPage: React.FC = () => {
           <div className="space-y-2">
             <label className="text-xs text-zinc-400">Active profile</label>
             <select
-              value={draft.activeChromeProfile ?? ''}
+              value={draft.chromeActiveProfileName ?? ''}
               onChange={(e) => setActiveProfile(e.target.value)}
               className="w-full rounded-lg border border-zinc-700 bg-zinc-950 px-3 py-2 text-sm text-zinc-100 focus:border-blue-500 focus:outline-none"
             >
@@ -262,8 +311,8 @@ export const SettingsPage: React.FC = () => {
         </div>
 
         <div className="space-y-3 rounded-xl border border-zinc-800 bg-zinc-900/70 p-4">
-          <h4 className="text-sm font-semibold text-white">Sessions</h4>
-          <p className="text-xs text-zinc-400">Root directory and cleanup options.</p>
+          <h4 className="text-sm font-semibold text-white">Paths</h4>
+          <p className="text-xs text-zinc-400">Sessions root and ffmpeg binary location.</p>
           <div className="space-y-2">
             <label className="text-xs text-zinc-400">Sessions root directory</label>
             <div className="mt-1 flex gap-2">
@@ -280,118 +329,22 @@ export const SettingsPage: React.FC = () => {
               </button>
             </div>
           </div>
-          <div className="flex flex-col gap-2 text-xs text-zinc-200">
-            <label className="inline-flex items-center gap-2">
-              <input
-                type="checkbox"
-                checked={draft.autoCleanupDownloads ?? false}
-                onChange={(e) => updateField('autoCleanupDownloads', e.target.checked)}
-                className="h-4 w-4 rounded border-zinc-700 bg-zinc-950 text-blue-500 focus:ring-blue-500"
-              />
-              Auto-clean old downloads
-            </label>
-            <label className="inline-flex items-center gap-2">
-              <input
-                type="checkbox"
-                checked={draft.autoCleanupProfiles ?? false}
-                onChange={(e) => updateField('autoCleanupProfiles', e.target.checked)}
-                className="h-4 w-4 rounded border-zinc-700 bg-zinc-950 text-blue-500 focus:ring-blue-500"
-              />
-              Auto-clean unused profiles
-            </label>
-          </div>
-        </div>
-
-        <div className="space-y-3 rounded-xl border border-zinc-800 bg-zinc-900/70 p-4">
-          <h4 className="text-sm font-semibold text-white">FFmpeg</h4>
-          <p className="text-xs text-zinc-400">Binary path and encoding defaults.</p>
           <div className="space-y-2">
             <label className="text-xs text-zinc-400">ffmpeg binary</label>
             <input
-              value={draft.ffmpegPath}
+              value={draft.ffmpegPath ?? ''}
               onChange={(e) => updateField('ffmpegPath', e.target.value)}
               className="w-full rounded-lg border border-zinc-700 bg-zinc-950 px-3 py-2 text-sm text-zinc-100 focus:border-blue-500 focus:outline-none"
             />
           </div>
-          <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
-            <div className="space-y-2">
-              <label className="text-xs text-zinc-400">vcodec</label>
-              <input
-                value={draft.ffmpegVcodec ?? ''}
-                onChange={(e) => updateField('ffmpegVcodec', e.target.value)}
-                className="w-full rounded-lg border border-zinc-700 bg-zinc-950 px-3 py-2 text-sm text-zinc-100 focus:border-blue-500 focus:outline-none"
-              />
-            </div>
-            <div className="space-y-2">
-              <label className="text-xs text-zinc-400">crf</label>
-              <input
-                type="number"
-                value={draft.ffmpegCrf ?? 0}
-                onChange={(e) => updateField('ffmpegCrf', Number(e.target.value))}
-                className="w-full rounded-lg border border-zinc-700 bg-zinc-950 px-3 py-2 text-sm text-zinc-100 focus:border-blue-500 focus:outline-none"
-              />
-            </div>
-            <div className="space-y-2">
-              <label className="text-xs text-zinc-400">preset</label>
-              <input
-                value={draft.ffmpegPreset ?? ''}
-                onChange={(e) => updateField('ffmpegPreset', e.target.value)}
-                className="w-full rounded-lg border border-zinc-700 bg-zinc-950 px-3 py-2 text-sm text-zinc-100 focus:border-blue-500 focus:outline-none"
-              />
-            </div>
-          </div>
         </div>
+      </div>
 
+      <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
         <div className="space-y-3 rounded-xl border border-zinc-800 bg-zinc-900/70 p-4">
-          <h4 className="text-sm font-semibold text-white">Watermark Cleaner</h4>
-          <p className="text-xs text-zinc-400">Template matching and frame extraction defaults.</p>
-          <div className="space-y-2">
-            <label className="text-xs text-zinc-400">Template path</label>
-            <input
-              value={draft.watermarkTemplatePath ?? ''}
-              onChange={(e) => updateField('watermarkTemplatePath', e.target.value)}
-              className="w-full rounded-lg border border-zinc-700 bg-zinc-950 px-3 py-2 text-sm text-zinc-100 focus:border-blue-500 focus:outline-none"
-              placeholder="/path/to/template.png"
-            />
-          </div>
-          <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
-            <div className="space-y-2">
-              <label className="text-xs text-zinc-400">Confidence</label>
-              <input
-                type="number"
-                step="0.05"
-                min="0"
-                max="1"
-                value={draft.watermarkConfidence ?? 0}
-                onChange={(e) => updateField('watermarkConfidence', Number(e.target.value))}
-                className="w-full rounded-lg border border-zinc-700 bg-zinc-950 px-3 py-2 text-sm text-zinc-100 focus:border-blue-500 focus:outline-none"
-              />
-            </div>
-            <div className="space-y-2">
-              <label className="text-xs text-zinc-400">Frames</label>
-              <input
-                type="number"
-                value={draft.watermarkFrames ?? 0}
-                onChange={(e) => updateField('watermarkFrames', Number(e.target.value))}
-                className="w-full rounded-lg border border-zinc-700 bg-zinc-950 px-3 py-2 text-sm text-zinc-100 focus:border-blue-500 focus:outline-none"
-              />
-            </div>
-            <div className="space-y-2">
-              <label className="text-xs text-zinc-400">Downscale</label>
-              <input
-                type="number"
-                value={draft.watermarkDownscale ?? 1}
-                onChange={(e) => updateField('watermarkDownscale', Number(e.target.value))}
-                className="w-full rounded-lg border border-zinc-700 bg-zinc-950 px-3 py-2 text-sm text-zinc-100 focus:border-blue-500 focus:outline-none"
-              />
-            </div>
-          </div>
-        </div>
-
-        <div className="space-y-3 rounded-xl border border-zinc-800 bg-zinc-900/70 p-4">
-          <h4 className="text-sm font-semibold text-white">Automator</h4>
-          <p className="text-xs text-zinc-400">Default pacing and retry behavior.</p>
-          <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
+          <h4 className="text-sm font-semibold text-white">Timings</h4>
+          <p className="text-xs text-zinc-400">Prompt pacing and limits.</p>
+          <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
             <div className="space-y-2">
               <label className="text-xs text-zinc-400">Prompt delay (ms)</label>
               <input
@@ -402,25 +355,16 @@ export const SettingsPage: React.FC = () => {
               />
             </div>
             <div className="space-y-2">
-              <label className="text-xs text-zinc-400">Step delay (ms)</label>
+              <label className="text-xs text-zinc-400">Max parallel sessions</label>
               <input
                 type="number"
-                value={draft.automatorDelayMs ?? 0}
-                onChange={(e) => updateField('automatorDelayMs', Number(e.target.value))}
-                className="w-full rounded-lg border border-zinc-700 bg-zinc-950 px-3 py-2 text-sm text-zinc-100 focus:border-blue-500 focus:outline-none"
-              />
-            </div>
-            <div className="space-y-2">
-              <label className="text-xs text-zinc-400">Retries</label>
-              <input
-                type="number"
-                value={draft.automatorRetryCount ?? 0}
-                onChange={(e) => updateField('automatorRetryCount', Number(e.target.value))}
+                value={draft.maxParallelSessions}
+                onChange={(e) => updateField('maxParallelSessions', Number(e.target.value))}
                 className="w-full rounded-lg border border-zinc-700 bg-zinc-950 px-3 py-2 text-sm text-zinc-100 focus:border-blue-500 focus:outline-none"
               />
             </div>
           </div>
-          <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
+          <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
             <div className="space-y-2">
               <label className="text-xs text-zinc-400">Draft timeout (ms)</label>
               <input
@@ -439,58 +383,101 @@ export const SettingsPage: React.FC = () => {
                 className="w-full rounded-lg border border-zinc-700 bg-zinc-950 px-3 py-2 text-sm text-zinc-100 focus:border-blue-500 focus:outline-none"
               />
             </div>
+          </div>
+        </div>
+
+        <div className="space-y-3 rounded-xl border border-zinc-800 bg-zinc-900/70 p-4">
+          <h4 className="text-sm font-semibold text-white">Cleanup</h4>
+          <p className="text-xs text-zinc-400">Retention policy for downloads and temp files.</p>
+          <label className="inline-flex items-center gap-2 text-xs text-zinc-200">
+            <input
+              type="checkbox"
+              checked={draft.cleanup?.enabled ?? false}
+              onChange={(e) => updateCleanup('enabled', e.target.checked)}
+              className="h-4 w-4 rounded border-zinc-700 bg-zinc-950 text-blue-500 focus:ring-blue-500"
+            />
+            Enable scheduled cleanup
+          </label>
+          <label className="inline-flex items-center gap-2 text-xs text-zinc-200">
+            <input
+              type="checkbox"
+              checked={draft.cleanup?.dryRun ?? false}
+              onChange={(e) => updateCleanup('dryRun', e.target.checked)}
+              className="h-4 w-4 rounded border-zinc-700 bg-zinc-950 text-blue-500 focus:ring-blue-500"
+            />
+            Dry run (log only)
+          </label>
+          <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
             <div className="space-y-2">
-              <label className="text-xs text-zinc-400">Max parallel sessions</label>
+              <label className="text-xs text-zinc-400">Downloads retention (days)</label>
               <input
                 type="number"
-                value={draft.maxParallelSessions}
-                onChange={(e) => updateField('maxParallelSessions', Number(e.target.value))}
+                value={draft.cleanup?.retentionDaysDownloads ?? ''}
+                onChange={(e) => updateCleanup('retentionDaysDownloads', Number(e.target.value))}
+                className="w-full rounded-lg border border-zinc-700 bg-zinc-950 px-3 py-2 text-sm text-zinc-100 focus:border-blue-500 focus:outline-none"
+              />
+            </div>
+            <div className="space-y-2">
+              <label className="text-xs text-zinc-400">Blurred retention (days)</label>
+              <input
+                type="number"
+                value={draft.cleanup?.retentionDaysBlurred ?? ''}
+                onChange={(e) => updateCleanup('retentionDaysBlurred', Number(e.target.value))}
+                className="w-full rounded-lg border border-zinc-700 bg-zinc-950 px-3 py-2 text-sm text-zinc-100 focus:border-blue-500 focus:outline-none"
+              />
+            </div>
+            <div className="space-y-2">
+              <label className="text-xs text-zinc-400">Temp retention (days)</label>
+              <input
+                type="number"
+                value={draft.cleanup?.retentionDaysTemp ?? ''}
+                onChange={(e) => updateCleanup('retentionDaysTemp', Number(e.target.value))}
                 className="w-full rounded-lg border border-zinc-700 bg-zinc-950 px-3 py-2 text-sm text-zinc-100 focus:border-blue-500 focus:outline-none"
               />
             </div>
           </div>
         </div>
+      </div>
 
+      <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
         <div className="space-y-3 rounded-xl border border-zinc-800 bg-zinc-900/70 p-4">
           <h4 className="text-sm font-semibold text-white">Telegram</h4>
           <p className="text-xs text-zinc-400">Bot credentials and test trigger.</p>
+          <label className="inline-flex items-center gap-2 text-xs text-zinc-200">
+            <input
+              type="checkbox"
+              checked={draft.telegram?.enabled ?? false}
+              onChange={(e) => updateTelegram('enabled', e.target.checked)}
+              className="h-4 w-4 rounded border border-zinc-700 bg-zinc-950 text-blue-500 focus:ring-blue-500"
+            />
+            Enable Telegram notifications
+          </label>
           <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
             <div className="space-y-2">
               <label className="text-xs text-zinc-400">bot_token</label>
               <input
-                value={draft.telegramBotToken ?? ''}
-                onChange={(e) => updateField('telegramBotToken', e.target.value)}
+                value={draft.telegram?.botToken ?? ''}
+                onChange={(e) => updateTelegram('botToken', e.target.value)}
                 className="w-full rounded-lg border border-zinc-700 bg-zinc-950 px-3 py-2 text-sm text-zinc-100 focus:border-blue-500 focus:outline-none"
               />
             </div>
             <div className="space-y-2">
               <label className="text-xs text-zinc-400">chat_id</label>
               <input
-                value={draft.telegramChatId ?? ''}
-                onChange={(e) => updateField('telegramChatId', e.target.value)}
+                value={draft.telegram?.chatId ?? ''}
+                onChange={(e) => updateTelegram('chatId', e.target.value)}
                 className="w-full rounded-lg border border-zinc-700 bg-zinc-950 px-3 py-2 text-sm text-zinc-100 focus:border-blue-500 focus:outline-none"
               />
             </div>
           </div>
-          <div className="flex flex-col gap-2 text-xs text-zinc-200">
-            <label className="inline-flex items-center gap-2">
-              <input
-                type="checkbox"
-                checked={draft.autoSendDownloads ?? false}
-                onChange={(e) => updateField('autoSendDownloads', e.target.checked)}
-                className="h-4 w-4 rounded border-zinc-700 bg-zinc-950 text-blue-500 focus:ring-blue-500"
-              />
-              Auto-send downloaded videos
-            </label>
-            <div className="flex items-center gap-3">
-              <button
-                onClick={sendTestMessage}
-                className="rounded-lg border border-emerald-500/60 bg-emerald-500/10 px-3 py-2 text-xs font-semibold text-emerald-100 transition hover:bg-emerald-500/20"
-              >
-                Send test message
-              </button>
-              {testStatus && <span className="text-[11px] text-zinc-400">{testStatus}</span>}
-            </div>
+          <div className="flex items-center gap-3 text-xs">
+            <button
+              onClick={sendTestMessage}
+              className="rounded-lg border border-emerald-500/60 bg-emerald-500/10 px-3 py-2 font-semibold text-emerald-100 transition hover:bg-emerald-500/20"
+            >
+              Send test message
+            </button>
+            {testStatus && <span className="text-[11px] text-zinc-400">{testStatus}</span>}
           </div>
         </div>
       </div>

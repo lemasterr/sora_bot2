@@ -1,8 +1,8 @@
 import fs from 'fs/promises';
 import path from 'path';
 import os from 'os';
-import { loadConfig, saveConfig } from './config';
 import type { ChromeProfile, Config } from '../shared/types';
+import { getConfig, updateConfig } from './config/config';
 
 const chromeDirCandidates = (): string[] => {
   const home = os.homedir();
@@ -67,7 +67,7 @@ export const scanChromeProfiles = async (): Promise<ChromeProfile[]> => {
 };
 
 const mapWithActive = (profiles: ChromeProfile[], config: Config): ChromeProfile[] => {
-  const activeName = config.activeChromeProfile;
+  const activeName = (config as Config).chromeActiveProfileName;
   return profiles.map((profile) => ({
     ...profile,
     isActive: activeName ? profile.name === activeName : false
@@ -75,50 +75,50 @@ const mapWithActive = (profiles: ChromeProfile[], config: Config): ChromeProfile
 };
 
 export const scanAndStoreChromeProfiles = async (): Promise<ChromeProfile[]> => {
-  const config = await loadConfig();
+  const config = (await getConfig()) as Config;
   const profiles = await scanChromeProfiles();
-  await saveConfig({
+  await updateConfig({
     chromeProfiles: profiles,
-    activeChromeProfile: config.activeChromeProfile
-  });
-  const refreshed = await loadConfig();
+    chromeActiveProfileName: config.chromeActiveProfileName
+  } as Partial<Config>);
+  const refreshed = (await getConfig()) as Config;
   return mapWithActive(profiles, refreshed);
 };
 
 export const saveChromeProfile = async (profile: ChromeProfile): Promise<ChromeProfile[]> => {
-  const config = await loadConfig();
+  const config = (await getConfig()) as Config;
   const existing = config.chromeProfiles ?? [];
   const filtered = existing.filter((p) => p.name !== profile.name);
   const updated = [...filtered, { ...profile }];
-  await saveConfig({ chromeProfiles: updated });
-  const refreshed = await loadConfig();
+  await updateConfig({ chromeProfiles: updated } as Partial<Config>);
+  const refreshed = (await getConfig()) as Config;
   return mapWithActive(updated, refreshed);
 };
 
 export const removeChromeProfile = async (name: string): Promise<ChromeProfile[]> => {
-  const config = await loadConfig();
+  const config = (await getConfig()) as Config;
   const existing = config.chromeProfiles ?? [];
   const updated = existing.filter((p) => p.name !== name);
-  const nextActive = config.activeChromeProfile === name ? undefined : config.activeChromeProfile;
-  await saveConfig({ chromeProfiles: updated, activeChromeProfile: nextActive });
-  const refreshed = await loadConfig();
+  const nextActive = config.chromeActiveProfileName === name ? null : config.chromeActiveProfileName;
+  await updateConfig({ chromeProfiles: updated, chromeActiveProfileName: nextActive } as Partial<Config>);
+  const refreshed = (await getConfig()) as Config;
   return mapWithActive(updated, refreshed);
 };
 
 export const setActiveChromeProfile = async (name: string): Promise<ChromeProfile[]> => {
-  const config = await loadConfig();
+  const config = (await getConfig()) as Config;
   const existing = config.chromeProfiles ?? [];
   const hasProfile = existing.some((p) => p.name === name);
   if (!hasProfile) {
     throw new Error(`Profile "${name}" not found`);
   }
-  await saveConfig({ activeChromeProfile: name });
-  const refreshed = await loadConfig();
+  await updateConfig({ chromeActiveProfileName: name } as Partial<Config>);
+  const refreshed = (await getConfig()) as Config;
   return mapWithActive(existing, refreshed);
 };
 
 export const listChromeProfiles = async (): Promise<ChromeProfile[]> => {
-  const config = await loadConfig();
+  const config = (await getConfig()) as Config;
   const profiles = config.chromeProfiles ?? [];
   return mapWithActive(profiles, config);
 };

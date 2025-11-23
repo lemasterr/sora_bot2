@@ -1,39 +1,4 @@
-export interface Config {
-  sessionsRoot: string;
-  chromeExecutablePath: string;
-  chromeUserDataDir?: string;
-  ffmpegPath: string;
-  ffmpegVcodec?: string;
-  ffmpegCrf?: number;
-  ffmpegPreset?: string;
-  promptDelayMs: number;
-  automatorDelayMs?: number;
-  draftTimeoutMs: number;
-  downloadTimeoutMs: number;
-  maxParallelSessions: number;
-  automatorRetryCount?: number;
-  telegramBotToken?: string;
-  telegramChatId?: string;
-  autoSendDownloads?: boolean;
-  autoCleanupDownloads?: boolean;
-  autoCleanupProfiles?: boolean;
-  cleanup?: {
-    enabled?: boolean;
-    dryRun?: boolean;
-    retentionDaysDownloads?: number;
-    retentionDaysBlurred?: number;
-    retentionDaysTemp?: number;
-  };
-  watermarkTemplatePath?: string;
-  watermarkConfidence?: number;
-  watermarkFrames?: number;
-  watermarkDownscale?: number;
-  chromeProfiles?: ChromeProfile[];
-  activeChromeProfile?: string;
-  sessions?: ManagedSession[];
-  watermarkMasks?: WatermarkMask[];
-  activeWatermarkMaskId?: string;
-}
+import type { Config as BackendConfig } from '../electron/config/config';
 
 export interface ChromeProfile {
   name: string;
@@ -64,6 +29,16 @@ export interface ManagedSession {
   notes?: string;
   status?: 'idle' | 'running' | 'warning' | 'error';
 }
+
+// The Config type mirrors the canonical backend shape from electron/config/config.ts.
+// Optional arrays such as chromeProfiles or sessions are convenience fields derived at runtime
+// and may not be persisted by the config module itself.
+export type Config = BackendConfig & {
+  chromeProfiles?: ChromeProfile[];
+  sessions?: ManagedSession[];
+  watermarkMasks?: WatermarkMask[];
+  activeWatermarkMaskId?: string;
+};
 
 export type SessionCommandAction =
   | 'startChrome'
