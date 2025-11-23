@@ -111,7 +111,8 @@ export function Layout({
   );
 
   return (
-    <div className="relative flex h-screen flex-col bg-[#09090b] text-zinc-100">
+    <div className="relative flex h-screen flex-col bg-gradient-to-br from-[#05060b] via-[#0b0f1a] to-[#05060b] text-zinc-100">
+      <div className="absolute inset-0 pointer-events-none bg-[radial-gradient(circle_at_20%_20%,rgba(59,130,246,0.08),transparent_35%),radial-gradient(circle_at_80%_0%,rgba(168,85,247,0.08),transparent_32%)]" />
       <TitleBar
         title={pageTitle}
         description={pageDescription}
@@ -125,9 +126,9 @@ export function Layout({
           onNavigate={onNavigate}
           onToggleCollapse={() => setCollapsed((c) => !c)}
         />
-        <div className="flex min-w-0 flex-1 overflow-hidden bg-[#0d0d10]">
-          <main className="flex h-full w-full justify-center overflow-y-auto bg-gradient-to-br from-blue-600/10 to-transparent p-6 animate-fade-in">
-            <div className="flex h-full w-full max-w-6xl flex-col gap-4">
+        <div className="flex min-w-0 flex-1 overflow-hidden">
+          <main className="flex h-full w-full justify-center overflow-y-auto p-6 animate-fade-in">
+            <div className="relative flex h-full w-full max-w-6xl flex-col gap-4">
               {children}
             </div>
           </main>

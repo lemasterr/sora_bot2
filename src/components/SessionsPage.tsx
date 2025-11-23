@@ -202,12 +202,32 @@ export const SessionsPage: React.FC = () => {
       </div>
 
       <div className="rounded-xl border border-zinc-800 bg-zinc-900/70 p-4">
-          <div className="flex items-center justify-between border-b border-zinc-800 pb-3">
+        <div className="flex items-center justify-between border-b border-zinc-800 pb-3">
           <div>
-            <div className="text-lg font-semibold text-white">{form.name || 'Session Details'}</div>
+            <div className="flex items-center gap-3 text-lg font-semibold text-white">
+              {form.name || 'Session Details'}
+              {form.status && (
+                <span className={`rounded-full px-2 py-0.5 text-xs ${
+                  form.status === 'running'
+                    ? 'bg-emerald-500/20 text-emerald-200'
+                    : form.status === 'warning'
+                    ? 'bg-amber-500/20 text-amber-200'
+                    : form.status === 'error'
+                    ? 'bg-rose-500/20 text-rose-100'
+                    : 'bg-zinc-700/60 text-zinc-200'
+                }`}>
+                  {form.status}
+                </span>
+              )}
+            </div>
             <div className="text-sm text-zinc-400">Configure automation paths and behavior per session.</div>
+            <div className="mt-1 flex flex-wrap gap-3 text-xs text-zinc-500">
+              <span>Prompts: {form.promptCount ?? 0}</span>
+              <span>Titles: {form.titleCount ?? 0}</span>
+              <span>Downloads: {form.downloadedCount ?? 0}</span>
+            </div>
           </div>
-          <div className="flex gap-2">
+          <div className="flex flex-wrap gap-2">
             <button
               onClick={() => handleAction('open')}
               disabled={!form.id}
@@ -399,6 +419,7 @@ export const SessionsPage: React.FC = () => {
                   value={form.maxVideos ?? ''}
                   onChange={(e) => handleChange('maxVideos', Number(e.target.value))}
                 />
+                <span className="text-[11px] text-zinc-500">0 = без ограничения, будет скачано всё найденное</span>
               </label>
               <label className="block text-sm text-zinc-300">
                 Submitted Log
@@ -419,7 +440,7 @@ export const SessionsPage: React.FC = () => {
                   onChange={(e) => handleChange('failedLog', e.target.value)}
                 />
               </label>
-              <label className="flex items-center gap-2 text-sm text-zinc-300">
+              <label className="flex items-center gap-2 text-sm text-zinc-300" title="Открывать первый драфт перед прокруткой">
                 <input
                   type="checkbox"
                   checked={form.openDrafts ?? false}
@@ -431,7 +452,7 @@ export const SessionsPage: React.FC = () => {
             </div>
 
             <div className="flex flex-wrap gap-4 text-sm text-zinc-300">
-              <label className="flex items-center gap-2">
+              <label className="flex items-center gap-2" title="Автоматически запускать Chrome перед шагами сессии">
                 <input
                   type="checkbox"
                   checked={form.autoLaunchChrome ?? false}
@@ -440,7 +461,7 @@ export const SessionsPage: React.FC = () => {
                 />
                 Auto-launch Chrome
               </label>
-              <label className="flex items-center gap-2">
+              <label className="flex items-center gap-2" title="Запускать автоген сразу после открытия сессии">
                 <input
                   type="checkbox"
                   checked={form.autoLaunchAutogen ?? false}

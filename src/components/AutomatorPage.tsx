@@ -176,6 +176,7 @@ export const AutomatorPage: React.FC = () => {
                         onChange={(e) => updateStep(step.id, { limit: Number(e.target.value) })}
                         className="w-full rounded-md border border-zinc-700 bg-zinc-800 px-3 py-2 text-sm text-zinc-100 focus:border-blue-500 focus:outline-none"
                       />
+                      <p className="text-[11px] text-zinc-500">0 = без ограничения. Перекрывает лимит сессии.</p>
                     </div>
                   )}
                   {step.type === 'global_merge' && (

@@ -186,24 +186,27 @@ export const ContentPage: React.FC = () => {
 
   return (
     <div className="space-y-4">
-        <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+        <div className="flex flex-col gap-3 rounded-2xl border border-white/5 bg-zinc-900/60 p-4 shadow-lg shadow-blue-500/10 md:flex-row md:items-center md:justify-between">
           <div>
             <h3 className="text-xl font-semibold text-white">Content Editor</h3>
             <p className="text-sm text-zinc-400">Edit prompt, image, and title files for each Chrome profile.</p>
           </div>
           <div className="flex flex-col gap-2 md:flex-row md:items-center md:gap-3">
-            <select
-              value={selectedProfile}
-              onChange={(e) => setSelectedProfile(e.target.value)}
-              className="w-full max-w-xs rounded-xl border border-zinc-700 bg-zinc-900 px-3 py-2 text-sm text-zinc-100 focus:border-blue-500 focus:outline-none"
-            >
-              {profiles.length === 0 && <option value="">No profiles found</option>}
-              {profiles.map((profile) => (
-                <option key={profile.name} value={profile.name}>
-                  {profile.name}
-                </option>
-              ))}
-            </select>
+            <div className="flex items-center gap-2 rounded-xl border border-white/5 bg-white/5 px-3 py-2">
+              <span className="text-xs uppercase tracking-wide text-zinc-400">Profile</span>
+              <select
+                value={selectedProfile}
+                onChange={(e) => setSelectedProfile(e.target.value)}
+                className="w-full max-w-xs rounded-lg border border-zinc-700 bg-zinc-950 px-3 py-2 text-sm text-zinc-100 focus:border-blue-500 focus:outline-none"
+              >
+                {profiles.length === 0 && <option value="">No profiles found</option>}
+                {profiles.map((profile) => (
+                  <option key={profile.name} value={profile.name}>
+                    {profile.name}
+                  </option>
+                ))}
+              </select>
+            </div>
             <button
               onClick={async () => {
                 setScanning(true);
@@ -231,11 +234,13 @@ export const ContentPage: React.FC = () => {
                 }
               }}
               disabled={scanning}
-              className="inline-flex items-center justify-center rounded-lg border border-zinc-700 bg-zinc-900 px-3 py-2 text-sm text-zinc-100 hover:border-blue-500 disabled:opacity-50"
+              className="inline-flex items-center justify-center rounded-lg border border-blue-500/60 bg-blue-500/10 px-3 py-2 text-sm text-blue-100 hover:bg-blue-500/20 disabled:opacity-50"
             >
               {scanning ? 'Scanning…' : 'Rescan Profiles'}
             </button>
-            <div className="text-xs text-zinc-400 md:text-right">Editing profile: {selectedProfile || 'None selected'}</div>
+            <div className="rounded-lg border border-white/10 bg-white/5 px-3 py-2 text-xs text-blue-100 md:text-right">
+              Editing: {selectedProfile || 'None selected'}
+            </div>
           </div>
         </div>
 
