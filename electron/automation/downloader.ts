@@ -58,6 +58,21 @@ function safeFileName(title: string): string {
   return sanitized.length > 80 ? sanitized.slice(0, 80) : sanitized;
 }
 
+async function disconnectIfExternal(browser: Browser | null): Promise<void> {
+  if (!browser) return;
+
+  const meta = browser as any;
+  if (meta.__soraManaged) {
+    return;
+  }
+
+  try {
+    await browser.disconnect();
+  } catch {
+    // ignore disconnect errors
+  }
+}
+
 async function configureDownloads(page: Page, downloadsDir: string): Promise<void> {
   await ensureDir(downloadsDir);
   const client = await page.target().createCDPSession();
@@ -253,17 +268,7 @@ export async function runDownloads(session: Session, maxVideos = 0): Promise<Dow
     stopWatchdog(runId);
     cancellationMap.delete(session.id);
     unregisterSessionPage(session.id, page);
-    if (browser) {
-      const meta = browser as any;
-      const wasExisting = meta.__soraAlreadyRunning === true || meta.__soraManaged === true;
-      if (!wasExisting) {
-        try {
-          await browser.close();
-        } catch {
-          // ignore
-        }
-      }
-    }
+    await disconnectIfExternal(browser);
   }
 }
 

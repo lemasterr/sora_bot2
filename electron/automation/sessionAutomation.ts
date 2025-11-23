@@ -59,7 +59,7 @@ const closeBrowserSafe = async (browser: Browser | null) => {
       if (meta.__soraManaged) {
         return;
       }
-      await browser.close();
+      await browser.disconnect();
     }
   } catch (error) {
     console.error('Failed to close browser', error);
@@ -103,7 +103,8 @@ const getOrLaunchBrowser = async (
   }
 
   const profile = await resolveProfileForContext(ctx);
-  const port = resolveSessionCdpPort({ name: ctx.sessionName, cdpPort: null }, 9222);
+  const basePort = ctx.config.cdpPort ?? 9222;
+  const port = resolveSessionCdpPort({ name: ctx.sessionName, cdpPort: null }, basePort);
   const browser = await getOrLaunchChromeForProfile(profile, port);
   activeDraftBrowsers.set(ctx.sessionName, browser);
   browser.on('disconnected', () => activeDraftBrowsers.delete(ctx.sessionName));

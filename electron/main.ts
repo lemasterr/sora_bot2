@@ -109,7 +109,7 @@ app.on('window-all-closed', () => {
   }
 });
 
-app.on('before-quit', () => {
+app.on('before-quit', async () => {
   console.log('[main] before-quit');
   for (const browser of manualBrowsers.values()) {
     try {
@@ -119,7 +119,7 @@ app.on('before-quit', () => {
     }
   }
   manualBrowsers.clear();
-  shutdownAllChrome();
+  await shutdownAllChrome();
 });
 
 app.on('activate', () => {

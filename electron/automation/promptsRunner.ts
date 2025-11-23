@@ -68,6 +68,21 @@ async function preparePage(browser: Browser): Promise<Page> {
   return page;
 }
 
+async function disconnectIfExternal(browser: Browser | null): Promise<void> {
+  if (!browser) return;
+
+  const meta = browser as any;
+  if (meta.__soraManaged) {
+    return;
+  }
+
+  try {
+    await browser.disconnect();
+  } catch {
+    // ignore disconnect errors
+  }
+}
+
 export async function runPrompts(session: Session): Promise<PromptsRunResult> {
   const cancelFlag: CancelFlag = { cancelled: false };
   cancellationMap.set(session.id, cancelFlag);
@@ -192,17 +207,7 @@ export async function runPrompts(session: Session): Promise<PromptsRunResult> {
     stopWatchdog(runId);
     cancellationMap.delete(session.id);
     unregisterSessionPage(session.id, page);
-    if (browser) {
-      const meta = browser as any;
-      const wasExisting = meta.__soraAlreadyRunning === true || meta.__soraManaged === true;
-      if (!wasExisting) {
-        try {
-          await browser.close();
-        } catch (closeError) {
-          // ignore close errors
-        }
-      }
-    }
+    await disconnectIfExternal(browser);
   }
 }
 
