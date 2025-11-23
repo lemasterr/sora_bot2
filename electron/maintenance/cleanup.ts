@@ -2,6 +2,7 @@ import fs from 'fs/promises';
 import path from 'path';
 import { getConfig } from '../config/config';
 import { getUserDataPath } from '../config/config';
+import { ensureDir } from '../utils/fs';
 
 export type CleanupResult = {
   deleted: string[];
@@ -64,6 +65,7 @@ export async function runCleanupNow(): Promise<CleanupResult> {
 
   for (const category of categories) {
     for (const base of category.paths) {
+      await ensureDir(base);
       const files = await collectFiles(base);
       for (const file of files) {
         const stats = await fs.stat(file).catch(() => null);

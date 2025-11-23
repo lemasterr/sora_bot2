@@ -15,13 +15,23 @@ export function LogsPage() {
   const [filters, setFilters] = useState<Set<LogSource>>(new Set(SOURCES));
   const [exportMessage, setExportMessage] = useState<string>('');
   const logRef = useRef<HTMLDivElement>(null);
+  const [apiError, setApiError] = useState<string | null>(null);
 
   useEffect(() => {
-    if (!window.electronAPI.logs) return;
-    const unsubscribe = window.electronAPI.logs.subscribe((entry) => {
+    const api = (window as any).electronAPI;
+    const logsApi = api?.logs;
+    if (!logsApi?.subscribe) {
+      setApiError('Logging API is not available. Please run the Sora desktop app.');
+      return;
+    }
+
+    const unsubscribe = logsApi.subscribe((entry: AppLogEntry) => {
       setLogs((prev) => [...prev.slice(-900), entry]);
     });
-    return () => unsubscribe?.();
+
+    return () => {
+      unsubscribe?.();
+    };
   }, []);
 
   useEffect(() => {
@@ -51,11 +61,18 @@ export function LogsPage() {
 
   const exportLogs = async () => {
     setExportMessage('');
-    const result = await window.electronAPI.logs.export();
-    if (result.ok) {
-      setExportMessage(`Exported to ${result.path}`);
-    } else if (result.error !== 'cancelled') {
-      setExportMessage(result.error || 'Export failed');
+    const api = (window as any).electronAPI;
+    const logsApi = api?.logs;
+    if (!logsApi?.export) {
+      setExportMessage('Export is not available: Electron backend is missing.');
+      return;
+    }
+
+    const result: any = await logsApi.export();
+    if (result?.ok === false) {
+      setExportMessage(result.error || 'Failed to export logs');
+    } else {
+      setExportMessage('Opened logs folder.');
     }
   };
 
@@ -87,6 +104,9 @@ export function LogsPage() {
         </div>
       </div>
 
+      {apiError && (
+        <div className="rounded-lg border border-amber-700/70 bg-amber-900/30 px-4 py-2 text-sm text-amber-200">{apiError}</div>
+      )}
       {exportMessage && <div className="rounded-lg border border-emerald-700/70 bg-emerald-900/30 px-4 py-2 text-sm text-emerald-200">{exportMessage}</div>}
 
       <div className="flex-1 overflow-hidden rounded-xl border border-zinc-800 bg-black/90">

@@ -1,68 +1,47 @@
-export interface Config {
-  sessionsRoot: string;
-  chromeExecutablePath: string;
-  chromeUserDataDir?: string;
-  ffmpegPath: string;
-  ffmpegVcodec?: string;
-  ffmpegCrf?: number;
-  ffmpegPreset?: string;
-  promptDelayMs: number;
-  automatorDelayMs?: number;
-  draftTimeoutMs: number;
-  downloadTimeoutMs: number;
-  maxParallelSessions: number;
-  automatorRetryCount?: number;
-  telegramBotToken?: string;
-  telegramChatId?: string;
-  autoSendDownloads?: boolean;
-  autoCleanupDownloads?: boolean;
-  autoCleanupProfiles?: boolean;
-  cleanup?: {
-    enabled?: boolean;
-    dryRun?: boolean;
-    retentionDaysDownloads?: number;
-    retentionDaysBlurred?: number;
-    retentionDaysTemp?: number;
-  };
-  watermarkTemplatePath?: string;
-  watermarkConfidence?: number;
-  watermarkFrames?: number;
-  watermarkDownscale?: number;
-  chromeProfiles?: ChromeProfile[];
-  activeChromeProfile?: string;
-  sessions?: ManagedSession[];
-  watermarkMasks?: WatermarkMask[];
-  activeWatermarkMaskId?: string;
-}
+import type { Config as BackendConfig } from '../electron/config/config';
 
 export interface ChromeProfile {
   name: string;
   userDataDir: string;
-  profileDir: string;
+  profileDirectory: string; // canonical profile directory name inside userDataDir
+  profileDir?: string; // backward-compat alias for profileDirectory
   isActive?: boolean;
 }
 
 export interface ManagedSession {
   id: string;
   name: string;
-  chromeProfile?: string;
-  promptProfile?: string;
-  cdpPort?: number;
-  promptsFile?: string;
-  imagePromptsFile?: string;
-  titlesFile?: string;
-  submittedLog?: string;
-  failedLog?: string;
-  downloadDir?: string;
-  cleanDir?: string;
-  cursorFile?: string;
-  maxVideos?: number;
-  openDrafts?: boolean;
-  autoLaunchChrome?: boolean;
-  autoLaunchAutogen?: boolean;
-  notes?: string;
+  chromeProfileName: string | null;
+  promptProfile: string | null;
+  cdpPort: number | null;
+  promptsFile: string;
+  imagePromptsFile: string;
+  titlesFile: string;
+  submittedLog: string;
+  failedLog: string;
+  downloadDir: string;
+  cleanDir: string;
+  cursorFile: string;
+  maxVideos: number;
+  openDrafts: boolean;
+  autoLaunchChrome: boolean;
+  autoLaunchAutogen: boolean;
+  notes: string;
   status?: 'idle' | 'running' | 'warning' | 'error';
+  promptCount?: number;
+  titleCount?: number;
+  hasFiles?: boolean;
 }
+
+// The Config type mirrors the canonical backend shape from electron/config/config.ts.
+// Optional arrays such as chromeProfiles or sessions are convenience fields derived at runtime
+// and may not be persisted by the config module itself.
+export type Config = BackendConfig & {
+  chromeProfiles?: ChromeProfile[];
+  sessions?: ManagedSession[];
+  watermarkMasks?: WatermarkMask[];
+  activeWatermarkMaskId?: string;
+};
 
 export type SessionCommandAction =
   | 'startChrome'
@@ -86,14 +65,6 @@ export interface AppLogEntry {
   level: 'info' | 'error';
   message: string;
   sessionId?: string;
-}
-
-export interface SessionInfo {
-  name: string;
-  path: string;
-  hasFiles: boolean;
-  promptCount: number;
-  titleCount: number;
 }
 
 export interface SessionFiles {
@@ -180,17 +151,18 @@ export type PipelineStepType =
   | 'pipeline';
 
 export interface PipelineStep {
+  id?: string; // optional client-side identifier
   type: PipelineStepType;
-  sessions?: string[];
+  sessionIds?: string[];
   limit?: number;
   group?: string;
 }
 
 export interface PipelineProgress {
-  stepIndex: number;
+  stepIndex: number; // -1 reserved for pipeline-level events
   stepType: PipelineStepType;
   status: 'running' | 'success' | 'error';
   message: string;
   session?: string;
-  timestamp?: number;
+  timestamp: number;
 }

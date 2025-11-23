@@ -1,4 +1,7 @@
 #!/usr/bin/env bash
+# NOTE:
+# This script starts the Electron dev environment (Vite renderer + Electron shell).
+# Do NOT open http://localhost:5173 directly in your browser; use the Electron window that launches.
 set -euo pipefail
 
 SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)

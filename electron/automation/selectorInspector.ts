@@ -48,9 +48,9 @@ export async function startSelectorInspect(page: Page): Promise<void> {
         }
         const classes = Array.from(current.classList).slice(0, 3);
         if (classes.length) selector += `.${classes.join('.')}`;
-        const parent = current.parentElement;
+        const parent: HTMLElement | null = current.parentElement;
         if (parent) {
-          const siblings = Array.from(parent.children).filter((child) => child.tagName === current!.tagName);
+          const siblings = Array.from(parent.children).filter((child: Element) => child.tagName === current!.tagName);
           if (siblings.length > 1) {
             const idx = siblings.indexOf(current) + 1;
             selector += `:nth-of-type(${idx})`;

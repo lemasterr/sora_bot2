@@ -2,6 +2,8 @@ import { app } from 'electron';
 import fs from 'fs/promises';
 import path from 'path';
 
+import { ensureDir } from '../utils/fs';
+
 const HISTORY_FILE = 'history.jsonl';
 const MAX_HISTORY_BYTES = 10 * 1024 * 1024; // 10MB rotation threshold
 
@@ -19,13 +21,11 @@ function getHistoryPath(): string {
   return path.join(app.getPath('userData'), HISTORY_FILE);
 }
 
-async function ensureDir(): Promise<void> {
-  if (app.isReady()) {
-    await fs.mkdir(app.getPath('userData'), { recursive: true });
-    return;
+async function ensureHistoryDir(): Promise<void> {
+  if (!app.isReady()) {
+    await app.whenReady();
   }
-  await app.whenReady();
-  await fs.mkdir(app.getPath('userData'), { recursive: true });
+  await ensureDir(app.getPath('userData'));
 }
 
 async function rotateIfNeeded(filePath: string): Promise<void> {
@@ -44,18 +44,18 @@ async function rotateIfNeeded(filePath: string): Promise<void> {
 
 export async function appendHistory(record: HistoryEvent): Promise<void> {
   const entry: HistoryEvent = {
-    ts: record.ts ?? new Date().toISOString(),
     ...record,
+    ts: record.ts ?? new Date().toISOString(),
   };
 
-  await ensureDir();
+  await ensureHistoryDir();
   const filePath = getHistoryPath();
   await rotateIfNeeded(filePath);
   await fs.appendFile(filePath, `${JSON.stringify(entry)}\n`, 'utf-8');
 }
 
 async function readHistory(): Promise<HistoryEvent[]> {
-  await ensureDir();
+  await ensureHistoryDir();
   const filePath = getHistoryPath();
   try {
     const raw = await fs.readFile(filePath, 'utf-8');
