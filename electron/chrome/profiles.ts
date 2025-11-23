@@ -78,6 +78,54 @@ async function dirExists(candidate: string): Promise<boolean> {
   }
 }
 
+async function pathExists(candidate: string): Promise<boolean> {
+  try {
+    await fs.access(candidate);
+    return true;
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException)?.code === 'ENOENT') return false;
+    throw error;
+  }
+}
+
+async function ensureCloneSeededFromProfile(
+  profile: ChromeProfile,
+  cloneDir: string
+): Promise<void> {
+  const sourceProfileDir = path.join(
+    profile.userDataDir,
+    profile.profileDirectory || profile.profileDir || 'Default'
+  );
+  const targetProfileDir = path.join(
+    cloneDir,
+    profile.profileDirectory || profile.profileDir || 'Default'
+  );
+
+  const sourceLocalState = path.join(profile.userDataDir, 'Local State');
+  const targetLocalState = path.join(cloneDir, 'Local State');
+
+  const hasTargetProfile = await dirExists(targetProfileDir);
+  const hasTargetLocalState = await pathExists(targetLocalState);
+
+  // Seed Local State so Chrome recognizes the profile metadata inside the clone.
+  if (!hasTargetLocalState && (await pathExists(sourceLocalState))) {
+    await ensureDir(path.dirname(targetLocalState));
+    await fs.copyFile(sourceLocalState, targetLocalState);
+  }
+
+  if (!hasTargetProfile) {
+    const sourceExists = await dirExists(sourceProfileDir);
+    if (!sourceExists) {
+      throw new Error(
+        `Chrome profile directory not found at ${sourceProfileDir}. Please re-select the profile in Settings.`
+      );
+    }
+
+    await ensureDir(path.dirname(targetProfileDir));
+    await fs.cp(sourceProfileDir, targetProfileDir, { recursive: true });
+  }
+}
+
 export function readChromeProfiles(root: string): ChromeProfile[] {
   const localStatePath = path.join(root, 'Local State');
   const profiles: ChromeProfile[] = [];
@@ -168,6 +216,11 @@ export async function resolveProfileLaunchTarget(
   // Ensure the cloned profile directory exists before launching Chrome so we
   // never fail with "profile directory not found" on first use.
   await ensureDir(userDataDir);
+
+  // Seed the cloned directory with the selected profile's data so automation
+  // starts with the user's existing cookies/extensions instead of a guest
+  // profile.
+  await ensureCloneSeededFromProfile(profile, userDataDir);
 
   // We intentionally DO NOT pass --profile-directory here.
   // Chrome will treat this userDataDir as an independent profile root.
