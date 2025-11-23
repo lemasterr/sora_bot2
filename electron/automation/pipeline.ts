@@ -1,9 +1,14 @@
+import path from 'path';
+
 import type { PipelineProgress, PipelineStep, PipelineStepType } from '../../shared/types';
 import type { Session } from '../sessions/types';
 import { getSession, getSessionPaths } from '../sessions/repo';
 import { runPrompts } from './promptsRunner';
 import { runDownloads } from './downloader';
 import { cleanWatermarkBatch } from '../video/ffmpegWatermark';
+import { blurVideosInDir } from '../video/ffmpegBlur';
+import { stripMetadataInDir } from '../video/ffmpegMetadata';
+import { mergeVideosInDir } from '../video/ffmpegMerge';
 import { getConfig } from '../config/config';
 import { formatTemplate, sendTelegramMessage } from '../integrations/telegram';
 
@@ -74,7 +79,17 @@ export async function runPipeline(
               const result = await runPrompts(session);
               submitted += result.submitted;
               failed += result.failed;
-              if (result.errorCode === WATCHDOG_ERROR) {
+              if (!result.ok) {
+                hadError = true;
+                stepErrored = true;
+                emit(onProgress, {
+                  stepIndex: index,
+                  stepType,
+                  status: 'error',
+                  message: result.error ?? 'Prompts failed',
+                  session: session.id,
+                });
+              } else if (result.errorCode === WATCHDOG_ERROR) {
                 hadError = true;
                 stepErrored = true;
                 emit(onProgress, {
@@ -160,11 +175,12 @@ export async function runPipeline(
             try {
               const paths = await getSessionPaths(session);
               await cleanWatermarkBatch(paths.downloadDir, paths.cleanDir);
+              await stripMetadataInDir(paths.cleanDir);
               emit(onProgress, {
                 stepIndex: index,
                 stepType,
                 status: 'success',
-                message: `Cleaned watermarks for ${session.name}`,
+                message: `Copied videos to clean folder for ${session.name}`,
                 session: session.id,
               });
             } catch (error) {
@@ -197,8 +213,67 @@ export async function runPipeline(
           }
           break;
         }
-        case 'global_blur':
-        case 'global_merge':
+        case 'global_blur': {
+          const sessions = await resolveSessions(step.sessionIds);
+          const profileId = step.group || 'default';
+          for (const session of sessions) {
+            if (cancelled) break;
+            try {
+              const paths = await getSessionPaths(session);
+              const sourceDir = paths.cleanDir || paths.downloadDir;
+              const targetDir = path.join(paths.cleanDir, 'blurred');
+              await blurVideosInDir(sourceDir, targetDir, profileId);
+              emit(onProgress, {
+                stepIndex: index,
+                stepType,
+                status: 'success',
+                message: `Blurred videos for ${session.name} using profile ${profileId}`,
+                session: session.id,
+              });
+            } catch (error) {
+              hadError = true;
+              stepErrored = true;
+              emit(onProgress, {
+                stepIndex: index,
+                stepType,
+                status: 'error',
+                message: (error as Error).message ?? 'Blur failed',
+                session: session.id,
+              });
+            }
+          }
+          break;
+        }
+        case 'global_merge': {
+          const sessions = await resolveSessions(step.sessionIds);
+          for (const session of sessions) {
+            if (cancelled) break;
+            try {
+              const paths = await getSessionPaths(session);
+              const sourceDir = path.join(paths.cleanDir, 'blurred');
+              const outputFile = path.join(paths.cleanDir, 'merged.mp4');
+              await mergeVideosInDir(sourceDir, outputFile);
+              emit(onProgress, {
+                stepIndex: index,
+                stepType,
+                status: 'success',
+                message: `Merged videos for ${session.name}`,
+                session: session.id,
+              });
+            } catch (error) {
+              hadError = true;
+              stepErrored = true;
+              emit(onProgress, {
+                stepIndex: index,
+                stepType,
+                status: 'error',
+                message: (error as Error).message ?? 'Merge failed',
+                session: session.id,
+              });
+            }
+          }
+          break;
+        }
         case 'global_watermark':
         case 'global_probe': {
           emit(onProgress, {

@@ -19,6 +19,7 @@ const deriveProfileFromContext = (ctx: SessionRunContext): ChromeProfile => {
   const directoryName = path.basename(ctx.profileDir) || 'Default';
   const baseDir = path.dirname(ctx.profileDir);
   return {
+    id: directoryName,
     name: directoryName,
     userDataDir: baseDir,
     profileDirectory: directoryName,
@@ -28,7 +29,8 @@ const deriveProfileFromContext = (ctx: SessionRunContext): ChromeProfile => {
 
 export const launchBrowser = async (ctx: SessionRunContext): Promise<{ browser: Browser }> => {
   const profile = deriveProfileFromContext(ctx);
-  const port = resolveSessionCdpPort({ name: ctx.sessionName, cdpPort: null }, 9222);
+  const basePort = ctx.config.cdpPort ?? 9222;
+  const port = resolveSessionCdpPort({ name: ctx.sessionName, cdpPort: null }, basePort);
   const browser = await getOrLaunchChromeForProfile(profile, port);
   return { browser };
 };

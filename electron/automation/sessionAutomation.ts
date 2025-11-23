@@ -5,7 +5,7 @@ import type { RunResult } from '../../shared/types';
 import { configureDownloads, newPage, type SessionRunContext } from './chromeController';
 import { getOrLaunchChromeForProfile } from '../chrome/manager';
 import { resolveSessionCdpPort } from '../utils/ports';
-import { getActiveChromeProfile, scanChromeProfiles, type ChromeProfile } from '../chrome/profiles';
+import { resolveChromeProfileForSession, type ChromeProfile } from '../chrome/profiles';
 
 const delay = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
 
@@ -59,7 +59,7 @@ const closeBrowserSafe = async (browser: Browser | null) => {
       if (meta.__soraManaged) {
         return;
       }
-      await browser.close();
+      await browser.disconnect();
     }
   } catch (error) {
     console.error('Failed to close browser', error);
@@ -67,12 +67,31 @@ const closeBrowserSafe = async (browser: Browser | null) => {
 };
 
 const resolveProfileForContext = async (ctx: SessionRunContext): Promise<ChromeProfile> => {
-  // Prefer the globally active profile; if unavailable, fall back to the first scanned profile.
-  const profiles = await scanChromeProfiles();
-  const active = await getActiveChromeProfile();
-  if (active) return active;
-  if (profiles.length > 0) return profiles[0];
-  throw new Error('No Chrome profile available');
+  const profilePath = ctx.profileDir;
+
+  if (profilePath) {
+    const profileDirectory = path.basename(profilePath) || 'Default';
+    const userDataDir = path.dirname(profilePath);
+
+    try {
+      const stats = await fs.stat(profilePath);
+      if (stats.isDirectory()) {
+        return {
+          id: profileDirectory,
+          name: profileDirectory,
+          userDataDir,
+          profileDirectory,
+          profileDir: profileDirectory,
+        };
+      }
+    } catch {
+      // fall through to config-based resolution
+    }
+  }
+
+  const profile = await resolveChromeProfileForSession({ chromeProfileName: ctx.config.chromeActiveProfileName });
+  if (profile) return profile;
+  throw new Error('No Chrome profile available. Select a Chrome profile in Settings.');
 };
 
 const getOrLaunchBrowser = async (
@@ -85,7 +104,8 @@ const getOrLaunchBrowser = async (
   }
 
   const profile = await resolveProfileForContext(ctx);
-  const port = resolveSessionCdpPort({ name: ctx.sessionName, cdpPort: null }, 9222);
+  const basePort = ctx.config.cdpPort ?? 9222;
+  const port = resolveSessionCdpPort({ name: ctx.sessionName, cdpPort: null }, basePort);
   const browser = await getOrLaunchChromeForProfile(profile, port);
   activeDraftBrowsers.set(ctx.sessionName, browser);
   browser.on('disconnected', () => activeDraftBrowsers.delete(ctx.sessionName));

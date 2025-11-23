@@ -1,19 +1,67 @@
 import fs from 'fs/promises';
+import fsSync from 'fs';
 import os from 'os';
 import path from 'path';
 import { getConfig, updateConfig } from '../config/config';
 import { logError, logInfo } from '../logging/logger';
 import { ensureDir } from '../utils/fs';
+import { findSystemChromeExecutable } from './paths';
 
 export type ChromeProfile = {
+  id: string;
   name: string;
   userDataDir: string;
   profileDirectory: string;
   profileDir?: string;
+  isDefault?: boolean;
+  lastUsed?: string;
   isActive?: boolean;
 };
 
+export interface ChromeProfileInfo {
+  id: string;
+  name: string;
+  isDefault: boolean;
+  lastUsed?: string;
+}
+
+export type SessionProfilePreference = {
+  chromeProfileName?: string | null;
+  userDataDir?: string | null;
+  profileDirectory?: string | null;
+};
+
 let cachedProfiles: ChromeProfile[] | null = null;
+
+export function getChromeUserDataRoot(): string | null {
+  const home = os.homedir();
+  const exists = (candidate: string | null): candidate is string => {
+    if (!candidate) return false;
+    try {
+      return require('fs').existsSync(candidate);
+    } catch {
+      return false;
+    }
+  };
+
+  if (process.platform === 'darwin') {
+    const target = path.join(home, 'Library', 'Application Support', 'Google', 'Chrome');
+    return exists(target) ? target : null;
+  }
+
+  if (process.platform.startsWith('win')) {
+    const base = process.env.LOCALAPPDATA || process.env.APPDATA || process.env.USERPROFILE;
+    const target = base ? path.join(base, 'Google', 'Chrome', 'User Data') : null;
+    return exists(target) ? target : null;
+  }
+
+  const candidates = [path.join(home, '.config', 'google-chrome'), path.join(home, '.config', 'chromium')];
+  for (const candidate of candidates) {
+    if (exists(candidate)) return candidate;
+  }
+
+  return null;
+}
 
 function slugifyProfileName(name: string): string {
   const normalized = name.trim().toLowerCase().replace(/\s+/g, '-').replace(/[^a-z0-9-_]/gi, '');
@@ -30,59 +78,163 @@ async function dirExists(candidate: string): Promise<boolean> {
   }
 }
 
-export function discoverChromeProfileRoots(): string[] {
-  const home = os.homedir();
-  const candidates: string[] = [];
-
-  if (process.platform === 'darwin') {
-    candidates.push(path.join(home, 'Library', 'Application Support', 'Google', 'Chrome'));
-  } else if (process.platform.startsWith('win')) {
-    const envVars = ['LOCALAPPDATA', 'APPDATA', 'USERPROFILE'] as const;
-    for (const envVar of envVars) {
-      const base = process.env[envVar];
-      if (!base) continue;
-      const candidate = path.join(base, 'Google', 'Chrome', 'User Data');
-      if (!candidates.includes(candidate)) {
-        candidates.push(candidate);
-      }
-    }
-  } else {
-    candidates.push(path.join(home, '.config', 'google-chrome'));
-    candidates.push(path.join(home, '.config', 'chromium'));
+async function pathExists(candidate: string): Promise<boolean> {
+  try {
+    await fs.access(candidate);
+    return true;
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException)?.code === 'ENOENT') return false;
+    throw error;
   }
-
-  return candidates;
 }
 
-async function collectProfiles(basePath: string): Promise<ChromeProfile[]> {
-  if (!(await dirExists(basePath))) return [];
+async function ensureCloneSeededFromProfile(
+  profile: ChromeProfile,
+  cloneDir: string
+): Promise<void> {
+  const sourceProfileDir = path.join(
+    profile.userDataDir,
+    profile.profileDirectory || profile.profileDir || 'Default'
+  );
+  const targetProfileDir = path.join(
+    cloneDir,
+    profile.profileDirectory || profile.profileDir || 'Default'
+  );
 
-  const entries = await fs.readdir(basePath, { withFileTypes: true });
-  const allowedNames = ['Default', 'Guest Profile'];
-  const results: ChromeProfile[] = [];
+  const sourceLocalState = path.join(profile.userDataDir, 'Local State');
+  const targetLocalState = path.join(cloneDir, 'Local State');
 
-  for (const entry of entries) {
-    if (!entry.isDirectory()) continue;
-    if (!(allowedNames.includes(entry.name) || entry.name.startsWith('Profile '))) continue;
+  const profileDirName = profile.profileDirectory || profile.profileDir || 'Default';
 
-    results.push({
-      name: entry.name,
-      userDataDir: basePath,
-      profileDirectory: entry.name,
-      profileDir: entry.name,
-    });
+  const hasTargetProfile = await dirExists(targetProfileDir);
+  const hasTargetLocalState = await pathExists(targetLocalState);
+
+  // Seed Local State so Chrome recognizes the profile metadata inside the clone.
+  if (!hasTargetLocalState) {
+    await ensureDir(path.dirname(targetLocalState));
+
+    if (await pathExists(sourceLocalState)) {
+      await fs.copyFile(sourceLocalState, targetLocalState);
+    } else {
+      // Create a minimal Local State so Chrome doesn't fall back to a guest session.
+      const minimalState = {
+        profile: {
+          info_cache: {
+            [profileDirName]: {
+              name: profile.name ?? profileDirName,
+              is_default: true,
+            },
+          },
+          last_used: profileDirName,
+          last_active_profiles: [profileDirName],
+        },
+      } as Record<string, unknown>;
+
+      await fs.writeFile(targetLocalState, JSON.stringify(minimalState, null, 2), 'utf-8');
+    }
   }
 
-  return results;
+  if (!hasTargetProfile) {
+    const sourceExists = await dirExists(sourceProfileDir);
+    if (!sourceExists) {
+      throw new Error(
+        `Chrome profile directory not found at ${sourceProfileDir}. Please re-select the profile in Settings.`
+      );
+    }
+
+    await ensureDir(path.dirname(targetProfileDir));
+    await fs.cp(sourceProfileDir, targetProfileDir, { recursive: true });
+  }
+
+  await rewriteLocalStateForClone(targetLocalState, profileDirName, profile.name);
+}
+
+async function rewriteLocalStateForClone(
+  localStatePath: string,
+  profileDirName: string,
+  profileDisplayName?: string
+): Promise<void> {
+  try {
+    const raw = await fs.readFile(localStatePath, 'utf-8');
+    const parsed = JSON.parse(raw) as any;
+
+    if (!parsed.profile) parsed.profile = {};
+    if (!parsed.profile.info_cache) parsed.profile.info_cache = {};
+
+    // Ensure the selected profile exists in the cache and is marked as default/last used
+    const entry = parsed.profile.info_cache[profileDirName] ?? {};
+    parsed.profile.info_cache[profileDirName] = {
+      name: entry.name ?? profileDisplayName ?? profileDirName,
+      gaia_name: entry.gaia_name ?? profileDisplayName ?? profileDirName,
+      is_default: true,
+      ...entry,
+    };
+
+    parsed.profile.last_used = profileDirName;
+    parsed.profile.last_active_profiles = [profileDirName];
+
+    // Mark all other profiles as non-default to avoid Chrome preferring them.
+    for (const [key, value] of Object.entries(parsed.profile.info_cache)) {
+      if (key !== profileDirName && typeof value === 'object' && value) {
+        (value as any).is_default = false;
+      }
+    }
+
+    await fs.writeFile(localStatePath, JSON.stringify(parsed, null, 2), 'utf-8');
+  } catch (error) {
+    logError(
+      'chromeProfiles',
+      `Failed to rewrite Local State for cloned profile ${profileDirName}: ${(error as Error).message}`
+    );
+  }
+}
+
+export function readChromeProfiles(root: string): ChromeProfile[] {
+  const localStatePath = path.join(root, 'Local State');
+  const profiles: ChromeProfile[] = [];
+
+  try {
+    const raw = require('fs').readFileSync(localStatePath, 'utf-8');
+    const parsed = JSON.parse(raw);
+    const infoCache = parsed?.profile?.info_cache ?? {};
+
+    for (const [id, info] of Object.entries<any>(infoCache)) {
+      const displayName = info?.name || info?.gaia_name || id;
+      const isDefault = id === 'Default' || info?.is_default === true;
+      const lastUsed = info?.last_used as string | undefined;
+
+      profiles.push({
+        id,
+        name: displayName,
+        userDataDir: root,
+        profileDirectory: id,
+        profileDir: id,
+        isDefault,
+        lastUsed,
+      });
+    }
+  } catch (error) {
+    logError('chromeProfiles', `Failed to read Local State from ${localStatePath}: ${(error as Error).message}`);
+    return [];
+  }
+
+  profiles.sort((a, b) => {
+    if (a.isDefault && !b.isDefault) return -1;
+    if (b.isDefault && !a.isDefault) return 1;
+    if (a.lastUsed && b.lastUsed && a.lastUsed !== b.lastUsed) return a.lastUsed > b.lastUsed ? -1 : 1;
+    return a.name.localeCompare(b.name);
+  });
+
+  return profiles;
 }
 
 function annotateActive(
   profiles: ChromeProfile[],
-  activeName?: string | null,
+  activeId?: string | null,
   activeUserDataDir?: string | null
 ): ChromeProfile[] {
   return profiles.map((profile) => {
-    const matchesName = activeName ? profile.name === activeName : false;
+    const matchesName = activeId ? profile.profileDirectory === activeId || profile.id === activeId : false;
     const matchesDir = activeUserDataDir ? profile.userDataDir === activeUserDataDir : true;
     return {
       ...profile,
@@ -91,100 +243,112 @@ function annotateActive(
   });
 }
 
-/**
- * Resolve how we launch a Chrome profile for Puppeteer.
- *
- * Old behaviour (working in the previous build) pointed Puppeteer directly at the
- * profile directory (e.g. `${userDataDir}/Profile 1`) as the user-data-dir, which
- * avoids Chrome treating the default data dir as "unsafe" for remote debugging
- * and keeps existing Sora auth/session data intact. The newer build switched to
- * using the base userDataDir + `--profile-directory`, which triggered
- * `DevTools remote debugging requires a non-default data directory` and spun up
- * empty profiles for some users. The helper below restores the old launch path
- * while keeping the newer cached profile discovery intact.
- */
 export async function resolveProfileLaunchTarget(
   profile: ChromeProfile
 ): Promise<{ userDataDir: string; profileDirectoryArg?: string }> {
-  // Prefer launching directly against the profile directory (base + profile
-  // folder) so Chrome reuses the full cache/cookies for the chosen profile.
-  // If that directory does not exist for some reason, fall back to the base
-  // userDataDir with a --profile-directory hint (keeps compatibility with the
-  // cached discovery data).
-  const profilePath = path.join(profile.userDataDir, profile.profileDirectory);
+  /**
+   * Sora 9–style behavior:
+   * We NEVER launch Chrome directly against the system user-data root like:
+   *   ~/Library/Application Support/Google/Chrome
+   *
+   * Instead, we always use a dedicated "automation" clone directory under
+   *   config.chromeClonedProfilesRoot (default: <sessionsRoot>/chrome-clones)
+   * so that:
+   *   - normal Chrome can stay open on the main profile,
+   *   - automation Chrome instances are fully sandboxed,
+   *   - each selected profile gets its own stable clone dir.
+   *
+   * The "profile" argument still comes from scanChromeProfiles(), which reads
+   * the real profiles, but the launched Chrome will use our cloned dir.
+   */
 
-  try {
-    const stats = await fs.stat(profilePath);
-    if (stats.isDirectory()) {
-      return { userDataDir: profilePath, profileDirectoryArg: profile.profileDirectory };
-    }
-  } catch {
-    // ignore and fall back below
-  }
+  const config = await getConfig();
+  const cloneRoot =
+    config.chromeClonedProfilesRoot || path.join(config.sessionsRoot, 'chrome-clones');
 
-  return { userDataDir: profile.userDataDir, profileDirectoryArg: profile.profileDirectory };
+  // Ensure root exists
+  await ensureDir(cloneRoot);
+
+  // Build a stable slug for this profile's automation clone
+  const baseName = profile.profileDirectory || profile.name || profile.id;
+  const slug = slugifyProfileName(`${baseName}-sora-clone`);
+
+  // Final cloned user-data dir for automation
+  const userDataDir = path.join(cloneRoot, slug);
+
+  // Ensure the cloned profile directory exists before launching Chrome so we
+  // never fail with "profile directory not found" on first use.
+  await ensureDir(userDataDir);
+
+  // Seed the cloned directory with the selected profile's data so automation
+  // starts with the user's existing cookies/extensions instead of a guest
+  // profile.
+  await ensureCloneSeededFromProfile(profile, userDataDir);
+
+  // We intentionally DO NOT pass --profile-directory here.
+  // Chrome will treat this userDataDir as an independent profile root.
+  // All cookies/extensions/logins for Sora will live under this clone dir.
+  return { userDataDir, profileDirectoryArg: undefined };
 }
 
 export async function scanChromeProfiles(): Promise<ChromeProfile[]> {
   const config = await getConfig();
-  // Revert to the legacy discovery order: scan the OS default Chrome roots first
-  // (these contain the real signed-in user profiles) and only then consider any
-  // explicit chromeUserDataDir override as an *additional* base. Previously we
-  // prioritized chromeUserDataDir ahead of the standard roots, which caused
-  // Puppeteer to pick up empty/temporary profiles and lose Sora auth context.
-  const bases = discoverChromeProfileRoots();
-  const searchRoots = [...bases];
 
-  if (config.chromeUserDataDir && !searchRoots.includes(config.chromeUserDataDir)) {
-    searchRoots.push(config.chromeUserDataDir);
+  const chromeBinary = await findSystemChromeExecutable();
+  if (!chromeBinary) {
+    logError('chromeProfiles', 'Chrome executable not found. Install Chrome or set the path in Settings.');
   }
 
-  const results: ChromeProfile[] = [];
+  const roots: string[] = [];
+  if (config.chromeUserDataRoot) roots.push(config.chromeUserDataRoot);
+  else if (config.chromeUserDataDir) roots.push(config.chromeUserDataDir);
 
-  for (const base of searchRoots) {
-    try {
-      const expanded = base.replace(/^~(\\|\/)/, `${os.homedir()}$1`);
-      const profiles = await collectProfiles(expanded);
-      logInfo('chromeProfiles', `Found ${profiles.length} Chrome profiles in ${expanded}`);
-      for (const profile of profiles) {
-        const key = `${profile.userDataDir}::${profile.profileDirectory}`;
-        if (!results.find((p) => `${p.userDataDir}::${p.profileDirectory}` === key)) {
-          results.push(profile);
-        }
-      }
-    } catch (error) {
-      logError('chromeProfiles', `Failed to scan ${base}: ${(error as Error).message}`);
-    }
+  const systemRoot = getChromeUserDataRoot();
+  if (systemRoot && !roots.includes(systemRoot)) roots.push(systemRoot);
+
+  const uniqueRoots = roots.filter(Boolean);
+  if (uniqueRoots.length === 0) {
+    logError('chromeProfiles', 'Chrome user-data root not found. Please configure it in Settings.');
+    cachedProfiles = [];
+    return [];
+  }
+
+  const profiles: ChromeProfile[] = [];
+
+  for (const root of uniqueRoots) {
+    const exists = await dirExists(root);
+    if (!exists) continue;
+    const found = readChromeProfiles(root);
+    logInfo('chromeProfiles', `Found ${found.length} profiles under ${root}`);
+    profiles.push(...found.filter((p) => !profiles.find((q) => q.id === p.id && q.userDataDir === p.userDataDir)));
   }
 
   const annotated = annotateActive(
-    results,
-    config.chromeActiveProfileName ?? undefined,
-    config.chromeUserDataDir ?? undefined
+    profiles,
+    config.chromeProfileId ?? config.chromeActiveProfileName ?? undefined,
+    config.chromeUserDataRoot ?? config.chromeUserDataDir ?? undefined
   );
   cachedProfiles = annotated;
-  logInfo('chromeProfiles', `Total Chrome profiles detected: ${annotated.length}`);
   return annotated;
 }
 
 export async function setActiveChromeProfile(name: string): Promise<void> {
   const profiles = cachedProfiles ?? (await scanChromeProfiles());
-  const match = profiles.find((p) => p.name === name);
+  const match = profiles.find((p) => p.name === name || p.profileDirectory === name || p.id === name);
 
   if (!match) {
     throw new Error(`Profile "${name}" not found`);
   }
 
   const config = await updateConfig({
-    chromeActiveProfileName: name,
-    // Persist the exact userDataDir for disambiguation when multiple profiles share the same
-    // display name across different roots (e.g. cloned vs system Default). This mirrors the
-    // legacy behaviour where the active profile selection always carried its base directory.
+    chromeActiveProfileName: match.name,
+    chromeProfileId: match.profileDirectory,
+    chromeUserDataRoot: match.userDataDir,
     chromeUserDataDir: match.userDataDir,
   });
 
-  cachedProfiles = annotateActive(profiles, name, config.chromeUserDataDir ?? undefined);
-  logInfo('chromeProfiles', `Active Chrome profile set to ${name} @ ${match.userDataDir}`);
+  cachedProfiles = annotateActive(profiles, match.profileDirectory, config.chromeUserDataDir ?? undefined);
+  logInfo('chromeProfiles', `Active Chrome profile set to ${match.name} @ ${match.userDataDir}`);
 }
 
 export async function getActiveChromeProfile(): Promise<ChromeProfile | null> {
@@ -192,18 +356,54 @@ export async function getActiveChromeProfile(): Promise<ChromeProfile | null> {
   if (!cachedProfiles) {
     await scanChromeProfiles();
   }
-  // Prefer an exact match on both name and userDataDir to avoid picking another root that
-  // happens to contain the same profile name (e.g. cloned vs system). Fall back to name-only
-  // if the configured userDataDir is absent.
+  const desiredId = config.chromeProfileId ?? config.chromeActiveProfileName;
+  const desiredRoot = config.chromeUserDataRoot ?? config.chromeUserDataDir;
+
   const profile = cachedProfiles?.find(
     (p) =>
-      p.name === config.chromeActiveProfileName &&
-      (config.chromeUserDataDir ? p.userDataDir === config.chromeUserDataDir : true)
+      (p.profileDirectory === desiredId || p.id === desiredId || p.name === desiredId) &&
+      (desiredRoot ? p.userDataDir === desiredRoot : true)
   );
 
   if (profile) return profile;
 
-  return cachedProfiles?.find((p) => p.name === config.chromeActiveProfileName) ?? null;
+  return cachedProfiles?.find((p) => p.profileDirectory === desiredId || p.name === desiredId) ?? null;
+}
+
+export async function resolveChromeProfileForSession(
+  preference?: SessionProfilePreference
+): Promise<ChromeProfile | null> {
+  const [profiles, config] = await Promise.all([scanChromeProfiles(), getConfig()]);
+
+  const desiredName = preference?.chromeProfileName ?? config.chromeProfileId ?? config.chromeActiveProfileName ?? null;
+  const desiredUserDataDir = preference?.userDataDir ?? config.chromeUserDataRoot ?? null;
+  const desiredProfileDir = preference?.profileDirectory ?? null;
+
+  const matchesPreference = (candidate: ChromeProfile, requireName: boolean): boolean => {
+    const matchesName = desiredName
+      ? candidate.name === desiredName || candidate.profileDirectory === desiredName || candidate.id === desiredName
+      : !requireName;
+    const matchesUserData = desiredUserDataDir ? candidate.userDataDir === desiredUserDataDir : true;
+    const candidateDir = candidate.profileDirectory ?? candidate.profileDir;
+    const matchesProfileDir = desiredProfileDir ? candidateDir === desiredProfileDir : true;
+
+    const respectsConfiguredRoot = config.chromeUserDataDir ? candidate.userDataDir === config.chromeUserDataDir : true;
+
+    return matchesName && matchesUserData && matchesProfileDir && respectsConfiguredRoot;
+  };
+
+  const strictMatch = profiles.find((profile) => matchesPreference(profile, false));
+  if (strictMatch) return strictMatch;
+
+  if (desiredName) {
+    const nameOnlyMatch = profiles.find((profile) => matchesPreference(profile, true));
+    if (nameOnlyMatch) return nameOnlyMatch;
+  }
+
+  const active = await getActiveChromeProfile();
+  if (active) return active;
+
+  return profiles[0] ?? null;
 }
 
 export async function cloneActiveChromeProfile(): Promise<{ ok: boolean; profile?: ChromeProfile; message?: string; error?: string }> {

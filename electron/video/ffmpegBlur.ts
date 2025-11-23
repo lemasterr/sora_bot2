@@ -122,3 +122,17 @@ export async function blurVideoWithProfile(input: string, output: string, profil
 
   await blurVideo(input, output, profile.zones || []);
 }
+
+export async function blurVideosInDir(inputDir: string, outputDir: string, profileId: string): Promise<void> {
+  await ensureFfmpeg();
+  await fs.mkdir(outputDir, { recursive: true });
+
+  const entries = await fs.readdir(inputDir, { withFileTypes: true });
+  const files = entries.filter((e) => e.isFile() && e.name.toLowerCase().endsWith('.mp4'));
+
+  for (const file of files) {
+    const inputPath = path.join(inputDir, file.name);
+    const outputPath = path.join(outputDir, file.name);
+    await blurVideoWithProfile(inputPath, outputPath, profileId);
+  }
+}

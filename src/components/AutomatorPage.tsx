@@ -4,17 +4,17 @@ import type { PipelineProgress, PipelineStep, PipelineStepType } from '../shared
 
 type UiStep = PipelineStep & { id: string };
 
-const STEP_TYPES: { value: PipelineStepType; label: string }[] = [
-  { value: 'session_prompts', label: 'Session Prompts' },
-  { value: 'session_images', label: 'Session Images' },
-  { value: 'session_mix', label: 'Session Mix' },
-  { value: 'session_download', label: 'Session Download' },
-  { value: 'session_watermark', label: 'Session Watermark' },
-  { value: 'session_chrome', label: 'Session Chrome' },
-  { value: 'global_blur', label: 'Global Blur' },
-  { value: 'global_merge', label: 'Global Merge' },
-  { value: 'global_watermark', label: 'Global Watermark' },
-  { value: 'global_probe', label: 'Global Probe' }
+const STEP_TYPES: { value: PipelineStepType; label: string; hint?: string }[] = [
+  { value: 'session_prompts', label: 'Генерация видео (промпты)', hint: 'Вводит текстовые и визуальные промпты в сессию.' },
+  { value: 'session_images', label: 'Генерация изображений', hint: 'Заглушка для генерации изображений.' },
+  { value: 'session_mix', label: 'Смешивание контента', hint: 'Комбинированные шаги (пока заглушка).' },
+  { value: 'session_download', label: 'Скачивание видео', hint: 'Запускает загрузку роликов из драфтов.' },
+  { value: 'session_watermark', label: 'Копирование в чистую папку', hint: 'Перекладывает скачанные файлы в cleanDir.' },
+  { value: 'session_chrome', label: 'Chrome запуск', hint: 'Технический шаг для Chrome (заглушка).' },
+  { value: 'global_blur', label: 'Блюр водяных знаков', hint: 'Применяет выбранный профиль блюра к роликам.' },
+  { value: 'global_merge', label: 'Склейка видео', hint: 'Склеивает ролики из каталога clean/blurred.' },
+  { value: 'global_watermark', label: 'Обработка водяных знаков', hint: 'Глобальная обработка (заглушка).' },
+  { value: 'global_probe', label: 'Проверочный шаг (debug)', hint: 'Диагностический шаг без изменений.' }
 ];
 
 const createStep = (): UiStep => ({
@@ -32,7 +32,15 @@ export const AutomatorPage: React.FC = () => {
   const [status, setStatus] = useState<'idle' | 'running' | 'success' | 'error'>('idle');
   const [warning, setWarning] = useState<string>('');
 
-  const sessionOptions = useMemo(() => sessions.map((s) => ({ id: s.id, name: s.name })), [sessions]);
+  const sessionOptions = useMemo(
+    () =>
+      sessions.map((s) => ({
+        id: s.id,
+        name: s.name,
+        profileLabel: s.chromeProfileName ? `Chrome: ${s.chromeProfileName}` : 'Chrome: not set',
+      })),
+    [sessions]
+  );
   const sessionNameById = useMemo(() => Object.fromEntries(sessionOptions.map((s) => [s.id, s.name])), [sessionOptions]);
   const statusColor =
     status === 'running' ? 'bg-blue-500' : status === 'success' ? 'bg-emerald-500' : status === 'error' ? 'bg-red-500' : 'bg-zinc-700';
@@ -58,13 +66,60 @@ export const AutomatorPage: React.FC = () => {
     setSteps((prev) => prev.map((step) => (step.id === id ? { ...step, ...partial } : step)));
   };
 
+  const moveStep = (id: string, direction: 'up' | 'down') => {
+    setSteps((prev) => {
+      const idx = prev.findIndex((s) => s.id === id);
+      if (idx === -1) return prev;
+      const target = direction === 'up' ? idx - 1 : idx + 1;
+      if (target < 0 || target >= prev.length) return prev;
+      const next = [...prev];
+      const [removed] = next.splice(idx, 1);
+      next.splice(target, 0, removed);
+      return next;
+    });
+  };
+
   const addStep = () => setSteps((prev) => [...prev, createStep()]);
+
+  const applyClassicPreset = () => {
+    const sessionSelection = steps.flatMap((s) => s.sessionIds ?? []);
+    const uniqueSessionIds = sessionSelection.length
+      ? Array.from(new Set(sessionSelection))
+      : sessions.map((s) => s.id);
+    const downloadLimit = steps.find((s) => s.type === 'session_download')?.limit ?? 0;
+
+    const preset: UiStep[] = [
+      { id: crypto.randomUUID(), type: 'session_prompts', sessionIds: uniqueSessionIds, limit: 0, group: '' },
+      {
+        id: crypto.randomUUID(),
+        type: 'session_download',
+        sessionIds: uniqueSessionIds,
+        limit: downloadLimit,
+        group: '',
+      },
+      { id: crypto.randomUUID(), type: 'session_watermark', sessionIds: uniqueSessionIds, limit: 0, group: '' },
+      { id: crypto.randomUUID(), type: 'global_blur', sessionIds: uniqueSessionIds, limit: 0, group: '' },
+      { id: crypto.randomUUID(), type: 'global_merge', sessionIds: uniqueSessionIds, limit: 0, group: '' },
+    ];
+
+    setSteps(preset);
+  };
 
   const removeStep = (id: string) => setSteps((prev) => prev.filter((step) => step.id !== id));
 
-  const handleSessionsChange = (id: string, options: HTMLOptionElement[]) => {
-    const selectedSessions = options.filter((opt) => opt.selected).map((opt) => opt.value);
-    updateStep(id, { sessionIds: selectedSessions });
+  const toggleSession = (id: string, sessionId: string) => {
+    setSteps((prev) =>
+      prev.map((step) => {
+        if (step.id !== id) return step;
+        const next = new Set(step.sessionIds ?? []);
+        if (next.has(sessionId)) {
+          next.delete(sessionId);
+        } else {
+          next.add(sessionId);
+        }
+        return { ...step, sessionIds: Array.from(next) };
+      })
+    );
   };
 
   const startPipeline = async () => {
@@ -108,6 +163,12 @@ export const AutomatorPage: React.FC = () => {
             Add Step
           </button>
           <button
+            onClick={applyClassicPreset}
+            className="rounded-lg bg-indigo-600 px-3 py-2 text-sm font-semibold text-white transition hover:bg-indigo-500"
+          >
+            Classic Sora pipeline
+          </button>
+          <button
             onClick={startPipeline}
             className="rounded-lg bg-emerald-600 px-3 py-2 text-sm font-semibold text-white transition hover:bg-emerald-500"
           >
@@ -133,7 +194,7 @@ export const AutomatorPage: React.FC = () => {
                     className="rounded-md border border-zinc-700 bg-zinc-800 px-3 py-2 text-sm text-zinc-100 focus:border-blue-500 focus:outline-none"
                   >
                     {STEP_TYPES.map((option) => (
-                      <option key={option.value} value={option.value}>
+                      <option key={option.value} value={option.value} title={option.hint}>
                         {option.label}
                       </option>
                     ))}
@@ -145,24 +206,66 @@ export const AutomatorPage: React.FC = () => {
                 >
                   Remove Step
                 </button>
+                <div className="flex items-center gap-1">
+                  <button
+                    onClick={() => moveStep(step.id, 'up')}
+                    className="rounded border border-zinc-700 px-2 py-1 text-xs text-zinc-200 transition hover:border-blue-500"
+                    title="Move step up"
+                  >
+                    ↑
+                  </button>
+                  <button
+                    onClick={() => moveStep(step.id, 'down')}
+                    className="rounded border border-zinc-700 px-2 py-1 text-xs text-zinc-200 transition hover:border-blue-500"
+                    title="Move step down"
+                  >
+                    ↓
+                  </button>
+                </div>
               </div>
 
               <div className="mt-4 grid gap-4 md:grid-cols-2">
                 <div className="space-y-2">
-                  <label className="text-xs uppercase tracking-wide text-zinc-400">Sessions</label>
-                  <select
-                    multiple
-                    value={step.sessionIds}
-                    onChange={(e) => handleSessionsChange(step.id, Array.from(e.target.options))}
-                    className="h-28 w-full rounded-md border border-zinc-700 bg-zinc-800 px-3 py-2 text-sm text-zinc-100 focus:border-blue-500 focus:outline-none"
-                  >
-                    {sessionOptions.map((session) => (
-                      <option key={session.id} value={session.id}>
-                        {session.name}
-                      </option>
-                    ))}
-                  </select>
-                  <p className="text-xs text-zinc-500">Select one or more sessions for this step.</p>
+                  <div className="flex items-center justify-between text-xs uppercase tracking-wide text-zinc-400">
+                    <span>Sessions</span>
+                    <span className="text-[11px] text-zinc-500">
+                      {(step.sessionIds?.length ?? 0) > 0
+                        ? `${step.sessionIds?.length ?? 0} selected`
+                        : 'None selected'}
+                    </span>
+                  </div>
+
+                  <div className="space-y-2 rounded-lg border border-zinc-700 bg-zinc-800/60 p-2">
+                    {sessionOptions.length === 0 && (
+                      <div className="text-sm text-zinc-400">No sessions available.</div>
+                    )}
+
+                    {sessionOptions.map((session) => {
+                      const checked = step.sessionIds?.includes(session.id);
+                      return (
+                        <label
+                          key={session.id}
+                          className={`flex items-center justify-between gap-3 rounded-md border px-3 py-2 text-left transition ${
+                            checked
+                              ? 'border-emerald-500/60 bg-emerald-500/5 text-white'
+                              : 'border-zinc-700 bg-zinc-900/30 text-zinc-200 hover:border-blue-500'
+                          }`}
+                        >
+                          <div className="space-y-0.5">
+                            <div className="text-sm font-semibold">{session.name}</div>
+                            <div className="text-xs text-zinc-400">{session.profileLabel}</div>
+                          </div>
+                          <input
+                            type="checkbox"
+                            checked={checked}
+                            onChange={() => toggleSession(step.id, session.id)}
+                            className="h-4 w-4 accent-emerald-500"
+                          />
+                        </label>
+                      );
+                    })}
+                  </div>
+                  <p className="text-xs text-zinc-500">Toggle the sessions that should run for this step.</p>
                 </div>
 
                 <div className="grid gap-3 md:grid-cols-2">
@@ -179,15 +282,17 @@ export const AutomatorPage: React.FC = () => {
                       <p className="text-[11px] text-zinc-500">0 = без ограничения. Перекрывает лимит сессии.</p>
                     </div>
                   )}
-                  {step.type === 'global_merge' && (
+                  {(step.type === 'global_merge' || step.type === 'global_blur') && (
                     <div className="space-y-2">
-                      <label className="text-xs uppercase tracking-wide text-zinc-400">Group</label>
+                      <label className="text-xs uppercase tracking-wide text-zinc-400">
+                        {step.type === 'global_blur' ? 'Blur profile / group' : 'Group'}
+                      </label>
                       <input
                         type="text"
                         value={step.group ?? ''}
                         onChange={(e) => updateStep(step.id, { group: e.target.value })}
                         className="w-full rounded-md border border-zinc-700 bg-zinc-800 px-3 py-2 text-sm text-zinc-100 focus:border-blue-500 focus:outline-none"
-                        placeholder="merge group"
+                        placeholder={step.type === 'global_blur' ? 'blur profile id' : 'merge group'}
                       />
                     </div>
                   )}

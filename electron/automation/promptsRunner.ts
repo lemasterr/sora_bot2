@@ -1,16 +1,13 @@
 import fs from 'fs/promises';
 import path from 'path';
-import type { Browser, Page } from 'puppeteer-core';
+import puppeteer, { type Browser, type Page } from 'puppeteer-core';
 
-import { launchBrowserForSession } from '../chrome/cdp';
-import { getActiveChromeProfile, scanChromeProfiles, type ChromeProfile } from '../chrome/profiles';
 import { getConfig, type Config } from '../config/config';
 import { getSessionPaths } from '../sessions/repo';
 import type { Session } from '../sessions/types';
 import { formatTemplate, sendTelegramMessage } from '../integrations/telegram';
 import { heartbeat, startWatchdog, stopWatchdog } from './watchdog';
 import { registerSessionPage, unregisterSessionPage } from './selectorInspector';
-import { resolveSessionCdpPort } from '../utils/ports';
 
 function delay(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -61,31 +58,54 @@ async function readLines(filePath: string): Promise<string[]> {
   }
 }
 
-async function resolveProfile(session: Session): Promise<ChromeProfile | null> {
-  const [profiles, config] = await Promise.all([scanChromeProfiles(), getConfig()]);
-  if (session.chromeProfileName) {
-    const preferred = profiles.find(
-      (p) =>
-        p.name === session.chromeProfileName &&
-        (config.chromeUserDataDir ? p.userDataDir === config.chromeUserDataDir : true)
-    );
-    if (preferred) return preferred;
+function resolveCdpEndpoint(config: Config): string {
+  const envEndpoint = process.env.CDP_ENDPOINT?.trim();
+  if (envEndpoint) return envEndpoint;
 
-    const match = profiles.find((p) => p.name === session.chromeProfileName);
-    if (match) return match;
-  }
-  return getActiveChromeProfile();
+  const port = Number(config.cdpPort ?? DEFAULT_CDP_PORT);
+  const safePort = Number.isFinite(port) ? port : DEFAULT_CDP_PORT;
+  return `http://127.0.0.1:${safePort}`;
 }
 
 async function preparePage(browser: Browser): Promise<Page> {
-  const page = await browser.newPage();
-  await page.goto('https://sora.chatgpt.com', { waitUntil: 'networkidle2' });
-  await page.waitForSelector(PROMPT_SELECTOR, { timeout: 60_000 });
+  const context = browser.browserContexts()[0] ?? browser.defaultBrowserContext();
+  const pages = await context.pages();
+  const existing = pages.find((p) => p.url().startsWith('https://sora.chatgpt.com'));
+  const page = existing ?? (await context.newPage());
+
+  try {
+    await page.waitForSelector(PROMPT_SELECTOR, { timeout: 20_000 });
+  } catch {
+    await page.goto('https://sora.chatgpt.com', { waitUntil: 'networkidle2' });
+    await page.waitForSelector(PROMPT_SELECTOR, { timeout: 60_000 });
+  }
+
   return page;
 }
 
-export async function runPrompts(session: Session): Promise<PromptsRunResult> {
-  const cancelFlag: CancelFlag = { cancelled: false };
+async function disconnectIfExternal(browser: Browser | null): Promise<void> {
+  if (!browser) return;
+
+  const meta = browser as any;
+  if (meta.__soraManaged) {
+    return;
+  }
+
+  try {
+    await browser.disconnect();
+  } catch {
+    // ignore disconnect errors
+  }
+}
+
+/**
+ * Submit prompts for a single session. Shared by direct session actions and pipeline steps.
+ */
+export async function runPrompts(
+  session: Session,
+  externalCancelFlag?: CancelFlag
+): Promise<PromptsRunResult> {
+  const cancelFlag: CancelFlag = externalCancelFlag ?? { cancelled: false };
   cancellationMap.set(session.id, cancelFlag);
 
   const runId = `prompts:${session.id}:${Date.now()}`;
@@ -100,14 +120,15 @@ export async function runPrompts(session: Session): Promise<PromptsRunResult> {
   try {
     const [loadedConfig, paths] = await Promise.all([getConfig(), getSessionPaths(session)]);
     config = loadedConfig;
-    const profile = await resolveProfile(session);
+    const cdpEndpoint = resolveCdpEndpoint(config);
 
-    if (!profile) {
-      return { ok: false, submitted, failed, error: 'No Chrome profile available' };
-    }
+    const connected = (await puppeteer.connect({
+      browserURL: cdpEndpoint,
+      defaultViewport: null,
+    })) as Browser & { __soraManaged?: boolean };
 
-    const cdpPort = resolveSessionCdpPort(session, (config as Partial<{ cdpPort: number }>).cdpPort ?? DEFAULT_CDP_PORT);
-    browser = await launchBrowserForSession(profile, cdpPort);
+    connected.__soraManaged = false;
+    browser = connected;
     const prepare = async () => {
       if (!browser) return;
       if (page) {
@@ -208,17 +229,7 @@ export async function runPrompts(session: Session): Promise<PromptsRunResult> {
     stopWatchdog(runId);
     cancellationMap.delete(session.id);
     unregisterSessionPage(session.id, page);
-    if (browser) {
-      const meta = browser as any;
-      const wasExisting = meta.__soraAlreadyRunning === true || meta.__soraManaged === true;
-      if (!wasExisting) {
-        try {
-          await browser.close();
-        } catch (closeError) {
-          // ignore close errors
-        }
-      }
-    }
+    await disconnectIfExternal(browser);
   }
 }
 
