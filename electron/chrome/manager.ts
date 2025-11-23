@@ -189,6 +189,64 @@ export async function getOrLaunchChromeForProfile(profile: ChromeProfile, port: 
   return browser;
 }
 
+export async function attachExistingChromeForProfile(
+  profile: ChromeProfile,
+  port: number
+): Promise<Browser> {
+  const key = instanceKey(profile);
+  const existing = activeInstances.get(key);
+
+  // Если уже есть подключённый браузер для этого профиля — просто используем его
+  if (existing && existing.browser.isConnected()) {
+    return existing.browser;
+  }
+
+  const endpoint = `http://${CDP_HOST}:${port}`;
+
+  // ВАЖНО: здесь НЕ спавним Chrome, только проверяем наличие CDP
+  if (!(await isEndpointAvailable(endpoint))) {
+    throw new Error(
+      `Chrome is not running with remote debugging on port ${port}. ` +
+        `Start Chrome for this session first (Start Chrome) or launch Chrome manually with "--remote-debugging-port=${port}".`
+    );
+  }
+
+  const browser = (await puppeteer.connect({
+    browserURL: endpoint,
+    defaultViewport: null,
+  })) as Browser & { __soraAlreadyRunning?: boolean; __soraManaged?: boolean };
+
+  // Это внешний (уже запущенный) Chrome
+  browser.__soraAlreadyRunning = true;
+  browser.__soraManaged = false;
+
+  activeInstances.set(key, {
+    key,
+    browser,
+    endpoint,
+    port,
+    userDataDir: profile.userDataDir,
+    profileDirectory: profile.profileDirectory ?? profile.profileDir ?? 'Default',
+    spawned: false,
+    childPid: existing?.childPid,
+  });
+
+  browser.on('disconnected', () => {
+    const current = activeInstances.get(key);
+    if (current && current.browser === browser) {
+      activeInstances.delete(key);
+    }
+  });
+
+  console.info('[chrome] attached to existing Chrome', {
+    endpoint,
+    userDataDir: profile.userDataDir,
+    profileDirectory: profile.profileDirectory ?? profile.profileDir ?? 'Default',
+  });
+
+  return browser;
+}
+
 export async function shutdownChromeByKey(key: string): Promise<void> {
   const existing = activeInstances.get(key);
 
