@@ -1,7 +1,7 @@
 import path from 'path';
 import { app, BrowserWindow, ipcMain, shell } from 'electron';
 import { getConfig, updateConfig } from './config/config';
-import { listChromeProfiles, scanChromeProfiles, setActiveChromeProfile } from './chrome/profiles';
+import { listChromeProfiles, scanChromeProfiles, setActiveChromeProfile, getActiveChromeProfile } from './chrome/profiles';
 import { getSession, listSessions, saveSession, deleteSession } from './sessions/repo';
 import { runPrompts, cancelPrompts } from './automation/promptsRunner';
 import { runDownloads, cancelDownloads } from './automation/downloader';
@@ -14,8 +14,14 @@ import { getDailyStats, getTopSessions } from './logging/history';
 import { getLastSelectorForSession, startInspectorForSession } from './automation/selectorInspector';
 import { runCleanupNow, scheduleDailyCleanup } from './maintenance/cleanup';
 import { readProfileFiles, saveProfileFiles } from './content/profileFiles';
+import { sessionLogBroker } from './sessionLogs';
+import { launchBrowserForSession } from './chrome/cdp';
+import type { Session } from './sessions/types';
+import type { SessionCommandAction } from '../shared/types';
+import type { Browser } from 'puppeteer-core';
 
 let mainWindow: BrowserWindow | null = null;
+const manualBrowsers = new Map<string, Browser>();
 
 const isDev = process.env.NODE_ENV !== 'production';
 
@@ -46,6 +52,20 @@ function createMainWindow(): void {
   });
 }
 
+function logSession(sessionId: string, scope: string, level: 'info' | 'error', message: string) {
+  const entry = { timestamp: Date.now(), scope, level, message };
+  sessionLogBroker.log(sessionId, entry);
+}
+
+async function resolveSessionProfile(session: Session) {
+  if (session.chromeProfileName) {
+    const profiles = await scanChromeProfiles();
+    const found = profiles.find((p) => p.name === session.chromeProfileName);
+    if (found) return found;
+  }
+  return getActiveChromeProfile();
+}
+
 console.log('[main] starting, NODE_ENV=', process.env.NODE_ENV);
 
 app.whenReady()
@@ -67,6 +87,14 @@ app.on('window-all-closed', () => {
 
 app.on('before-quit', () => {
   console.log('[main] before-quit');
+  for (const browser of manualBrowsers.values()) {
+    try {
+      browser.close();
+    } catch {
+      // ignore
+    }
+  }
+  manualBrowsers.clear();
 });
 
 app.on('activate', () => {
@@ -104,10 +132,86 @@ handle('chrome:setActiveProfile', async (name: string) => {
   return { ok: true, profiles };
 });
 
+ipcMain.handle('sessions:subscribeLogs', (event, sessionId: string) => {
+  sessionLogBroker.subscribe(sessionId, event.sender);
+  return { ok: true };
+});
+
+ipcMain.handle('sessions:unsubscribeLogs', (event, sessionId: string) => {
+  sessionLogBroker.unsubscribe(sessionId, event.sender.id);
+  return { ok: true };
+});
+
 handle('sessions:list', async () => listSessions());
 handle('sessions:get', async (id: string) => getSession(id));
 handle('sessions:save', async (session) => saveSession(session));
 handle('sessions:delete', async (id: string) => deleteSession(id));
+handle('sessions:command', async (sessionId: string, action: SessionCommandAction) => {
+  const session = await getSession(sessionId);
+  if (!session) return { ok: false, error: 'Session not found' };
+
+  const safePort = session.cdpPort && Number.isFinite(session.cdpPort) ? Number(session.cdpPort) : 9222;
+
+  try {
+    if (action === 'startChrome') {
+      const profile = await resolveSessionProfile(session as Session);
+      if (!profile) throw new Error('No Chrome profile available');
+      const existing = manualBrowsers.get(session.id);
+      if (existing) {
+        try {
+          await existing.close();
+        } catch {
+          // ignore close errors
+        }
+      }
+      const browser = await launchBrowserForSession(profile, safePort);
+      manualBrowsers.set(session.id, browser);
+      logSession(session.id, 'Chrome', 'info', `Started Chrome on port ${safePort}`);
+      return { ok: true, details: `Started Chrome on port ${safePort}` };
+    }
+
+    if (action === 'runPrompts') {
+      logSession(session.id, 'Prompts', 'info', 'Starting prompt run');
+      const result = await runPrompts(session as Session);
+      logSession(session.id, 'Prompts', result.ok ? 'info' : 'error', result.ok ? 'Prompts finished' : result.error || 'Prompt run failed');
+      return result;
+    }
+
+    if (action === 'runDownloads') {
+      logSession(session.id, 'Download', 'info', 'Starting downloads');
+      const result = await runDownloads(session as Session, session.maxVideos ?? 0);
+      logSession(session.id, 'Download', result.ok ? 'info' : 'error', result.ok ? 'Downloads finished' : result.error || 'Download run failed');
+      return result;
+    }
+
+    if (action === 'cleanWatermark') {
+      logSession(session.id, 'Watermark', 'info', 'Watermark cleanup not implemented');
+      return { ok: false, error: 'Watermark cleanup is not implemented yet' };
+    }
+
+    if (action === 'stop') {
+      await cancelPrompts(session.id);
+      await cancelDownloads(session.id);
+      const browser = manualBrowsers.get(session.id);
+      if (browser) {
+        try {
+          await browser.close();
+        } catch {
+          // ignore
+        }
+        manualBrowsers.delete(session.id);
+      }
+      logSession(session.id, 'Worker', 'info', 'Stop signal sent');
+      return { ok: true, details: 'Stopped session workers' };
+    }
+
+    return { ok: false, error: `Unknown action ${action}` };
+  } catch (error) {
+    const message = (error as Error).message || 'Session command failed';
+    logSession(session.id, 'Worker', 'error', message);
+    return { ok: false, error: message };
+  }
+});
 handle('files:read', async (profileName?: string | null) => {
   const files = await readProfileFiles(profileName);
   return { ok: true, files };

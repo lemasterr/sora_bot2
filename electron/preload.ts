@@ -1,4 +1,5 @@
 import { contextBridge, ipcRenderer } from 'electron';
+import type { SessionCommandAction } from '../shared/types';
 
 const safeInvoke = async (channel: string, ...args: unknown[]) => {
   try {
@@ -25,11 +26,33 @@ contextBridge.exposeInMainWorld('electronAPI', {
     get: (id: string): Promise<unknown> => safeInvoke('sessions:get', id),
     save: (session: unknown): Promise<unknown> => safeInvoke('sessions:save', session),
     delete: (id: string): Promise<unknown> => safeInvoke('sessions:delete', id),
+    command: (sessionId: string, action: SessionCommandAction): Promise<unknown> =>
+      safeInvoke('sessions:command', sessionId, action),
     runPrompts: (id: string): Promise<unknown> => safeInvoke('sessions:runPrompts', id),
     cancelPrompts: (id: string): Promise<unknown> => safeInvoke('sessions:cancelPrompts', id),
     runDownloads: (id: string, maxVideos?: number): Promise<unknown> =>
       safeInvoke('sessions:runDownloads', id, maxVideos ?? 0),
     cancelDownloads: (id: string): Promise<unknown> => safeInvoke('sessions:cancelDownloads', id),
+    subscribeLogs: (sessionId: string, cb: (entry: unknown) => void) => {
+      const handler = (_event: unknown, id: string, payload: unknown) => {
+        if (id !== sessionId) return;
+        if (Array.isArray(payload)) {
+          payload.forEach((item) => cb(item));
+        } else {
+          cb(payload);
+        }
+      };
+
+      ipcRenderer.on('sessions:logs:init', handler);
+      ipcRenderer.on('sessions:log', handler);
+      safeInvoke('sessions:subscribeLogs', sessionId);
+
+      return () => {
+        safeInvoke('sessions:unsubscribeLogs', sessionId);
+        ipcRenderer.removeListener('sessions:logs:init', handler);
+        ipcRenderer.removeListener('sessions:log', handler);
+      };
+    },
   },
   files: {
     read: (profileName?: string | null): Promise<unknown> => safeInvoke('files:read', profileName ?? null),
