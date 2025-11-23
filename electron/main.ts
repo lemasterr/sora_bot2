@@ -22,6 +22,7 @@ import { runCleanupNow, scheduleDailyCleanup } from './maintenance/cleanup';
 import { readProfileFiles, saveProfileFiles } from './content/profileFiles';
 import { sessionLogBroker } from './sessionLogs';
 import { launchBrowserForSession } from './chrome/cdp';
+import { resolveSessionCdpPort } from './utils/ports';
 import type { Session } from './sessions/types';
 import type { SessionCommandAction } from '../shared/types';
 import type { Browser } from 'puppeteer-core';
@@ -90,7 +91,8 @@ async function getOrLaunchManualBrowser(session: Session): Promise<Browser> {
     throw new Error('No Chrome profile available');
   }
 
-  const safePort = session.cdpPort && Number.isFinite(session.cdpPort) ? Number(session.cdpPort) : 9222;
+  const config = await getConfig();
+  const safePort = resolveSessionCdpPort(session, (config as Partial<{ cdpPort: number }>).cdpPort ?? 9222);
   const browser = await launchBrowserForSession(profile, safePort);
   manualBrowsers.set(session.id, browser);
   return browser;
@@ -181,7 +183,8 @@ handle('sessions:command', async (sessionId: string, action: SessionCommandActio
   const session = await getSession(sessionId);
   if (!session) return { ok: false, error: 'Session not found' };
 
-  const safePort = session.cdpPort && Number.isFinite(session.cdpPort) ? Number(session.cdpPort) : 9222;
+  const config = await getConfig();
+  const safePort = resolveSessionCdpPort(session, (config as Partial<{ cdpPort: number }>).cdpPort ?? 9222);
 
   try {
     if (action === 'startChrome') {

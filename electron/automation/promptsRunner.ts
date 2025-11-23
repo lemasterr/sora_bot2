@@ -10,6 +10,7 @@ import type { Session } from '../sessions/types';
 import { formatTemplate, sendTelegramMessage } from '../integrations/telegram';
 import { heartbeat, startWatchdog, stopWatchdog } from './watchdog';
 import { registerSessionPage, unregisterSessionPage } from './selectorInspector';
+import { resolveSessionCdpPort } from '../utils/ports';
 
 function delay(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -98,7 +99,7 @@ export async function runPrompts(session: Session): Promise<PromptsRunResult> {
       return { ok: false, submitted, failed, error: 'No Chrome profile available' };
     }
 
-    const cdpPort = session.cdpPort ?? (config as Partial<{ cdpPort: number }>).cdpPort ?? DEFAULT_CDP_PORT;
+    const cdpPort = resolveSessionCdpPort(session, (config as Partial<{ cdpPort: number }>).cdpPort ?? DEFAULT_CDP_PORT);
     browser = await launchBrowserForSession(profile, cdpPort);
     const prepare = async () => {
       if (!browser) return;

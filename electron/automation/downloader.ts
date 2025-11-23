@@ -13,6 +13,7 @@ import { registerSessionPage, unregisterSessionPage } from './selectorInspector'
 import { runPostDownloadHook } from './hooks';
 import { ensureDir } from '../utils/fs';
 import { logInfo } from '../logging/logger';
+import { resolveSessionCdpPort } from '../utils/ports';
 
 function delay(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -151,7 +152,7 @@ export async function runDownloads(session: Session, maxVideos = 0): Promise<Dow
       return { ok: false, downloaded, error: 'No Chrome profile available' };
     }
 
-    const cdpPort = session.cdpPort ?? (config as Partial<{ cdpPort: number }>).cdpPort ?? DEFAULT_CDP_PORT;
+    const cdpPort = resolveSessionCdpPort(session, (config as Partial<{ cdpPort: number }>).cdpPort ?? DEFAULT_CDP_PORT);
     browser = await launchBrowserForSession(profile, cdpPort);
 
     const prepare = async () => {
