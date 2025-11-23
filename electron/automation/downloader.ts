@@ -1,9 +1,7 @@
 import fs from 'fs/promises';
 import path from 'path';
-import type { Browser, Page } from 'puppeteer-core';
+import puppeteer, { type Browser, type Page } from 'puppeteer-core';
 
-import { attachExistingChromeForProfile } from '../chrome/manager';
-import { resolveChromeProfileForSession } from '../chrome/profiles';
 import { getConfig, type Config } from '../config/config';
 import { getSessionPaths } from '../sessions/repo';
 import type { Session } from '../sessions/types';
@@ -13,7 +11,6 @@ import { registerSessionPage, unregisterSessionPage } from './selectorInspector'
 import { runPostDownloadHook } from './hooks';
 import { ensureDir } from '../utils/fs';
 import { logInfo } from '../logging/logger';
-import { resolveSessionCdpPort } from '../utils/ports';
 
 function delay(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -82,10 +79,20 @@ async function configureDownloads(page: Page, downloadsDir: string): Promise<voi
   });
 }
 
+function resolveCdpEndpoint(config: Config): string {
+  const envEndpoint = process.env.CDP_ENDPOINT?.trim();
+  if (envEndpoint) return envEndpoint;
+
+  const port = Number(config.cdpPort ?? DEFAULT_CDP_PORT);
+  const safePort = Number.isFinite(port) ? port : DEFAULT_CDP_PORT;
+  return `http://127.0.0.1:${safePort}`;
+}
+
 async function preparePage(browser: Browser, downloadDir: string): Promise<Page> {
-  const pages = await browser.pages();
+  const context = browser.browserContexts()[0] ?? browser.defaultBrowserContext();
+  const pages = await context.pages();
   const existing = pages.find((p) => p.url().startsWith('https://sora.chatgpt.com'));
-  const page = existing ?? (await browser.newPage());
+  const page = existing ?? (await context.newPage());
 
   await configureDownloads(page, downloadDir);
   if (!page.url().startsWith('https://sora.chatgpt.com/drafts')) {
@@ -157,14 +164,15 @@ export async function runDownloads(session: Session, maxVideos = 0): Promise<Dow
   try {
     const [loadedConfig, paths] = await Promise.all([getConfig(), getSessionPaths(session)]);
     config = loadedConfig;
-    const cdpPort = resolveSessionCdpPort(session, config.cdpPort ?? DEFAULT_CDP_PORT);
-    const profile = await resolveChromeProfileForSession({ chromeProfileName: session.chromeProfileName });
+    const cdpEndpoint = resolveCdpEndpoint(config);
 
-    if (!profile) {
-      return { ok: false, downloaded, error: 'No Chrome profile available. Select a Chrome profile in Settings.' };
-    }
+    const connected = (await puppeteer.connect({
+      browserURL: cdpEndpoint,
+      defaultViewport: null,
+    })) as Browser & { __soraManaged?: boolean };
 
-    browser = await attachExistingChromeForProfile(profile, cdpPort);
+    connected.__soraManaged = false;
+    browser = connected;
 
     const prepare = async () => {
       if (!browser) return;
