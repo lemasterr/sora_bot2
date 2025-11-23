@@ -129,22 +129,21 @@ export async function resolveProfileLaunchTarget(
 
 export async function scanChromeProfiles(): Promise<ChromeProfile[]> {
   const config = await getConfig();
+  // Revert to the legacy discovery order: scan the OS default Chrome roots first
+  // (these contain the real signed-in user profiles) and only then consider any
+  // explicit chromeUserDataDir override as an *additional* base. Previously we
+  // prioritized chromeUserDataDir ahead of the standard roots, which caused
+  // Puppeteer to pick up empty/temporary profiles and lose Sora auth context.
   const bases = discoverChromeProfileRoots();
-  const prioritizedBases: string[] = [];
+  const searchRoots = [...bases];
 
-  if (config.chromeUserDataDir) {
-    prioritizedBases.push(config.chromeUserDataDir);
-  }
-
-  for (const base of bases) {
-    if (!prioritizedBases.includes(base)) {
-      prioritizedBases.push(base);
-    }
+  if (config.chromeUserDataDir && !searchRoots.includes(config.chromeUserDataDir)) {
+    searchRoots.push(config.chromeUserDataDir);
   }
 
   const results: ChromeProfile[] = [];
 
-  for (const base of prioritizedBases) {
+  for (const base of searchRoots) {
     try {
       const expanded = base.replace(/^~(\\|\/)/, `${os.homedir()}$1`);
       const profiles = await collectProfiles(expanded);
