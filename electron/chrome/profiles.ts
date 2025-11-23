@@ -104,13 +104,34 @@ async function ensureCloneSeededFromProfile(
   const sourceLocalState = path.join(profile.userDataDir, 'Local State');
   const targetLocalState = path.join(cloneDir, 'Local State');
 
+  const profileDirName = profile.profileDirectory || profile.profileDir || 'Default';
+
   const hasTargetProfile = await dirExists(targetProfileDir);
   const hasTargetLocalState = await pathExists(targetLocalState);
 
   // Seed Local State so Chrome recognizes the profile metadata inside the clone.
-  if (!hasTargetLocalState && (await pathExists(sourceLocalState))) {
+  if (!hasTargetLocalState) {
     await ensureDir(path.dirname(targetLocalState));
-    await fs.copyFile(sourceLocalState, targetLocalState);
+
+    if (await pathExists(sourceLocalState)) {
+      await fs.copyFile(sourceLocalState, targetLocalState);
+    } else {
+      // Create a minimal Local State so Chrome doesn't fall back to a guest session.
+      const minimalState = {
+        profile: {
+          info_cache: {
+            [profileDirName]: {
+              name: profile.name ?? profileDirName,
+              is_default: true,
+            },
+          },
+          last_used: profileDirName,
+          last_active_profiles: [profileDirName],
+        },
+      } as Record<string, unknown>;
+
+      await fs.writeFile(targetLocalState, JSON.stringify(minimalState, null, 2), 'utf-8');
+    }
   }
 
   if (!hasTargetProfile) {
@@ -123,6 +144,48 @@ async function ensureCloneSeededFromProfile(
 
     await ensureDir(path.dirname(targetProfileDir));
     await fs.cp(sourceProfileDir, targetProfileDir, { recursive: true });
+  }
+
+  await rewriteLocalStateForClone(targetLocalState, profileDirName, profile.name);
+}
+
+async function rewriteLocalStateForClone(
+  localStatePath: string,
+  profileDirName: string,
+  profileDisplayName?: string
+): Promise<void> {
+  try {
+    const raw = await fs.readFile(localStatePath, 'utf-8');
+    const parsed = JSON.parse(raw) as any;
+
+    if (!parsed.profile) parsed.profile = {};
+    if (!parsed.profile.info_cache) parsed.profile.info_cache = {};
+
+    // Ensure the selected profile exists in the cache and is marked as default/last used
+    const entry = parsed.profile.info_cache[profileDirName] ?? {};
+    parsed.profile.info_cache[profileDirName] = {
+      name: entry.name ?? profileDisplayName ?? profileDirName,
+      gaia_name: entry.gaia_name ?? profileDisplayName ?? profileDirName,
+      is_default: true,
+      ...entry,
+    };
+
+    parsed.profile.last_used = profileDirName;
+    parsed.profile.last_active_profiles = [profileDirName];
+
+    // Mark all other profiles as non-default to avoid Chrome preferring them.
+    for (const [key, value] of Object.entries(parsed.profile.info_cache)) {
+      if (key !== profileDirName && typeof value === 'object' && value) {
+        (value as any).is_default = false;
+      }
+    }
+
+    await fs.writeFile(localStatePath, JSON.stringify(parsed, null, 2), 'utf-8');
+  } catch (error) {
+    logError(
+      'chromeProfiles',
+      `Failed to rewrite Local State for cloned profile ${profileDirName}: ${(error as Error).message}`
+    );
   }
 }
 
