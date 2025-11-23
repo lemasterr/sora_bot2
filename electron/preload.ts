@@ -1,5 +1,5 @@
 import { contextBridge, ipcRenderer } from 'electron';
-import type { DownloadedVideo, SessionCommandAction } from '../shared/types';
+import type { SessionCommandAction } from '../shared/types';
 
 const safeInvoke = async (channel: string, ...args: unknown[]) => {
   try {
@@ -12,7 +12,6 @@ const safeInvoke = async (channel: string, ...args: unknown[]) => {
 
 contextBridge.exposeInMainWorld('electronAPI', {
   ping: (): Promise<unknown> => safeInvoke('ping'),
-  listDownloadedVideos: (): Promise<DownloadedVideo[]> => safeInvoke('downloads:list'),
   config: {
     get: (): Promise<unknown> => safeInvoke('config:get'),
     update: (partial: unknown): Promise<unknown> => safeInvoke('config:update', partial),
