@@ -92,9 +92,11 @@ export async function blurVideo(input: string, output: string, zones: BlurZone[]
     const blurLabel = `blur${idx}`;
     const overlayLabel = `ol${idx}`;
 
-    filters.push({ filter: 'crop', options: `${zone.w}:${zone.h}:${zone.x}:${zone.y}`, inputs: lastLabel, outputs: cropLabel });
+    const baseLabel = lastLabel ?? '0:v';
+
+    filters.push({ filter: 'crop', options: `${zone.w}:${zone.h}:${zone.x}:${zone.y}`, inputs: baseLabel, outputs: cropLabel });
     filters.push({ filter: 'boxblur', options: '20:20', inputs: cropLabel, outputs: blurLabel });
-    filters.push({ filter: 'overlay', options: `${zone.x}:${zone.y}`, inputs: [lastLabel, blurLabel], outputs: overlayLabel });
+    filters.push({ filter: 'overlay', options: `${zone.x}:${zone.y}`, inputs: [baseLabel, blurLabel], outputs: overlayLabel });
 
     lastLabel = overlayLabel;
   });

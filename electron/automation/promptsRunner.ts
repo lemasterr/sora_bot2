@@ -10,6 +10,17 @@ import type { Session } from '../sessions/types';
 import { formatTemplate, sendTelegramMessage } from '../integrations/telegram';
 import { heartbeat, startWatchdog, stopWatchdog } from './watchdog';
 import { registerSessionPage, unregisterSessionPage } from './selectorInspector';
+import { resolveSessionCdpPort } from '../utils/ports';
+
+function delay(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function assertPage(page: Page | null): asserts page is Page {
+  if (!page) {
+    throw new Error('No active page');
+  }
+}
 
 export type PromptsRunResult = {
   ok: boolean;
@@ -88,7 +99,7 @@ export async function runPrompts(session: Session): Promise<PromptsRunResult> {
       return { ok: false, submitted, failed, error: 'No Chrome profile available' };
     }
 
-    const cdpPort = session.cdpPort ?? (config as Partial<{ cdpPort: number }>).cdpPort ?? DEFAULT_CDP_PORT;
+    const cdpPort = resolveSessionCdpPort(session, (config as Partial<{ cdpPort: number }>).cdpPort ?? DEFAULT_CDP_PORT);
     browser = await launchBrowserForSession(profile, cdpPort);
     const prepare = async () => {
       if (!browser) return;
@@ -127,23 +138,25 @@ export async function runPrompts(session: Session): Promise<PromptsRunResult> {
       heartbeat(runId);
       const promptText = prompts[index];
       if (!promptText || !page) continue;
+      assertPage(page);
+      const activePage = page as any;
 
       const imagePath = imagePrompts[index];
 
       try {
-        await page.click(PROMPT_SELECTOR, { clickCount: 3 });
-        await page.keyboard.press('Backspace');
-        await page.type(PROMPT_SELECTOR, promptText);
+        await activePage.click(PROMPT_SELECTOR, { clickCount: 3 });
+        await activePage.keyboard.press('Backspace');
+        await activePage.type(PROMPT_SELECTOR, promptText);
 
         if (imagePath) {
-          const input = await page.$(FILE_INPUT_SELECTOR);
+          const input = await activePage.$(FILE_INPUT_SELECTOR);
           if (input) {
             await input.uploadFile(imagePath);
           }
         }
 
-        await page.click(SUBMIT_SELECTOR);
-        await page.waitForTimeout(config.promptDelayMs);
+        await activePage.click(SUBMIT_SELECTOR);
+        await delay(config.promptDelayMs);
         heartbeat(runId);
 
         submitted += 1;
@@ -189,10 +202,14 @@ export async function runPrompts(session: Session): Promise<PromptsRunResult> {
     cancellationMap.delete(session.id);
     unregisterSessionPage(session.id, page);
     if (browser) {
-      try {
-        await browser.close();
-      } catch (closeError) {
-        // ignore close errors
+      const meta = browser as any;
+      const wasExisting = meta.__soraAlreadyRunning === true || meta.__soraManaged === true;
+      if (!wasExisting) {
+        try {
+          await browser.close();
+        } catch (closeError) {
+          // ignore close errors
+        }
       }
     }
   }

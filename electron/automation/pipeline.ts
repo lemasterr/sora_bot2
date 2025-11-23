@@ -1,3 +1,4 @@
+import type { PipelineProgress, PipelineStep, PipelineStepType } from '../../shared/types';
 import type { Session } from '../sessions/types';
 import { getSession, getSessionPaths } from '../sessions/repo';
 import { runPrompts } from './promptsRunner';
@@ -6,39 +7,16 @@ import { cleanWatermarkBatch } from '../video/ffmpegWatermark';
 import { getConfig } from '../config/config';
 import { formatTemplate, sendTelegramMessage } from '../integrations/telegram';
 
-export type StepType =
-  | 'session_prompts'
-  | 'session_images'
-  | 'session_mix'
-  | 'session_download'
-  | 'session_watermark'
-  | 'session_chrome'
-  | 'global_blur'
-  | 'global_merge'
-  | 'global_watermark'
-  | 'global_probe';
-
-export type PipelineStep = {
-  id: string;
-  type: StepType;
-  sessionIds?: string[];
-  limit?: number;
-  group?: string;
-};
-
-export type PipelineStatus = {
-  running: boolean;
-  currentStepId: string | null;
-  message: string;
-};
-
 let cancelled = false;
 const DEFAULT_TEMPLATE_DATA = { submitted: 0, failed: 0, downloaded: 0 };
 const WATCHDOG_ERROR = 'watchdog_timeout';
 
-function report(onProgress: (status: PipelineStatus) => void, status: PipelineStatus) {
+function emit(
+  onProgress: (status: PipelineProgress) => void,
+  progress: Omit<PipelineProgress, 'timestamp'>
+) {
   try {
-    onProgress(status);
+    onProgress({ ...progress, timestamp: Date.now() });
   } catch (error) {
     // swallow renderer progress errors
     // eslint-disable-next-line no-console
@@ -59,51 +37,118 @@ async function resolveSessions(ids: string[] = []): Promise<Session[]> {
 
 export async function runPipeline(
   steps: PipelineStep[],
-  onProgress: (status: PipelineStatus) => void
+  onProgress: (status: PipelineProgress) => void
 ): Promise<void> {
   cancelled = false;
   const start = Date.now();
   let submitted = 0;
   let failed = 0;
   let downloaded = 0;
-  report(onProgress, { running: true, currentStepId: null, message: 'Pipeline starting' });
+  let hadError = false;
+
+  emit(onProgress, { stepIndex: -1, stepType: 'pipeline', status: 'running', message: 'Pipeline starting' });
 
   try {
-    for (const step of steps) {
+    for (let index = 0; index < steps.length; index += 1) {
+      const step = steps[index];
       if (cancelled) break;
 
-      report(onProgress, {
-        running: true,
-        currentStepId: step.id,
-        message: `Running ${step.type}`,
-      });
+      const stepType = (step.type ?? 'pipeline') as PipelineStepType;
+      let stepErrored = false;
 
-      switch (step.type) {
+      emit(onProgress, { stepIndex: index, stepType, status: 'running', message: `Running ${stepType}` });
+
+      switch (stepType) {
         case 'session_prompts': {
           const sessions = await resolveSessions(step.sessionIds);
           for (const session of sessions) {
             if (cancelled) break;
-            const result = await runPrompts(session);
-            submitted += result.submitted;
-            failed += result.failed;
-            if (result.errorCode === WATCHDOG_ERROR) {
-              cancelled = true;
-              report(onProgress, { running: false, currentStepId: step.id, message: 'Watchdog timeout' });
-              break;
+            emit(onProgress, {
+              stepIndex: index,
+              stepType,
+              status: 'running',
+              message: `Running prompts for ${session.name}`,
+              session: session.id,
+            });
+            try {
+              const result = await runPrompts(session);
+              submitted += result.submitted;
+              failed += result.failed;
+              if (result.errorCode === WATCHDOG_ERROR) {
+                hadError = true;
+                stepErrored = true;
+                emit(onProgress, {
+                  stepIndex: index,
+                  stepType,
+                  status: 'error',
+                  message: 'Watchdog timeout during prompts',
+                  session: session.id,
+                });
+              } else {
+                emit(onProgress, {
+                  stepIndex: index,
+                  stepType,
+                  status: 'success',
+                  message: `Finished prompts for ${session.name}`,
+                  session: session.id,
+                });
+              }
+            } catch (error) {
+              hadError = true;
+              stepErrored = true;
+              emit(onProgress, {
+                stepIndex: index,
+                stepType,
+                status: 'error',
+                message: (error as Error).message ?? 'Prompts failed',
+                session: session.id,
+              });
             }
           }
           break;
         }
         case 'session_download': {
           const sessions = await resolveSessions(step.sessionIds);
+          const maxVideos = typeof step.limit === 'number' && step.limit > 0 ? step.limit : 0;
           for (const session of sessions) {
             if (cancelled) break;
-            const result = await runDownloads(session, step.limit ?? 0);
+            emit(onProgress, {
+              stepIndex: index,
+              stepType,
+              status: 'running',
+              message: `Running download for ${session.name}`,
+              session: session.id,
+            });
+            const result = await runDownloads(session, maxVideos);
             downloaded += result.downloaded;
-            if (result.errorCode === WATCHDOG_ERROR) {
-              cancelled = true;
-              report(onProgress, { running: false, currentStepId: step.id, message: 'Watchdog timeout' });
-              break;
+            if (!result.ok) {
+              hadError = true;
+              stepErrored = true;
+              emit(onProgress, {
+                stepIndex: index,
+                stepType,
+                status: 'error',
+                message: result.error ?? 'Download failed',
+                session: session.id,
+              });
+            } else if (result.errorCode === WATCHDOG_ERROR) {
+              hadError = true;
+              stepErrored = true;
+              emit(onProgress, {
+                stepIndex: index,
+                stepType,
+                status: 'error',
+                message: 'Watchdog timeout during download',
+                session: session.id,
+              });
+            } else {
+              emit(onProgress, {
+                stepIndex: index,
+                stepType,
+                status: 'success',
+                message: `Finished download for ${session.name}`,
+                session: session.id,
+              });
             }
           }
           break;
@@ -112,25 +157,81 @@ export async function runPipeline(
           const sessions = await resolveSessions(step.sessionIds);
           for (const session of sessions) {
             if (cancelled) break;
-            const paths = await getSessionPaths(session);
-            await cleanWatermarkBatch(paths.downloadDir, paths.cleanDir);
+            try {
+              const paths = await getSessionPaths(session);
+              await cleanWatermarkBatch(paths.downloadDir, paths.cleanDir);
+              emit(onProgress, {
+                stepIndex: index,
+                stepType,
+                status: 'success',
+                message: `Cleaned watermarks for ${session.name}`,
+                session: session.id,
+              });
+            } catch (error) {
+              hadError = true;
+              stepErrored = true;
+              emit(onProgress, {
+                stepIndex: index,
+                stepType,
+                status: 'error',
+                message: (error as Error).message ?? 'Watermark clean failed',
+                session: session.id,
+              });
+            }
           }
           break;
         }
         case 'session_images':
         case 'session_mix':
-        case 'session_chrome':
+        case 'session_chrome': {
+          const sessions = await resolveSessions(step.sessionIds);
+          for (const session of sessions) {
+            if (cancelled) break;
+            emit(onProgress, {
+              stepIndex: index,
+              stepType,
+              status: 'success',
+              message: `${stepType} not implemented for ${session.name}`,
+              session: session.id,
+            });
+          }
+          break;
+        }
         case 'global_blur':
         case 'global_merge':
         case 'global_watermark':
         case 'global_probe': {
-          // Stubs for future implementation
+          emit(onProgress, {
+            stepIndex: index,
+            stepType,
+            status: 'success',
+            message: `${stepType} step completed (stub)`,
+          });
           break;
         }
         default:
           break;
       }
+
+      emit(onProgress, {
+        stepIndex: index,
+        stepType,
+        status: cancelled || stepErrored ? 'error' : 'success',
+        message: cancelled
+          ? 'Step cancelled'
+          : stepErrored
+            ? `Finished ${stepType} with errors`
+            : `Finished ${stepType}`,
+      });
     }
+  } catch (error) {
+    emit(onProgress, {
+      stepIndex: -1,
+      stepType: 'pipeline',
+      status: 'error',
+      message: (error as Error).message ?? 'Pipeline failed',
+    });
+    hadError = true;
   } finally {
     const durationMinutes = Number(((Date.now() - start) / 1000 / 60).toFixed(2));
     if (!cancelled) {
@@ -148,10 +249,11 @@ export async function runPipeline(
         await sendTelegramMessage(text);
       }
     }
-    report(onProgress, {
-      running: false,
-      currentStepId: null,
-      message: cancelled ? 'Pipeline cancelled' : 'Pipeline complete',
+    emit(onProgress, {
+      stepIndex: -1,
+      stepType: 'pipeline',
+      status: cancelled || hadError ? 'error' : 'success',
+      message: cancelled ? 'Pipeline cancelled' : hadError ? 'Pipeline failed' : 'Pipeline complete',
     });
   }
 }

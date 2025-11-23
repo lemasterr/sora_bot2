@@ -1,6 +1,6 @@
 import { randomUUID } from 'crypto';
-import type { ManagedSession } from '../shared/types';
-import { loadConfig, saveConfig } from './config';
+import type { Config, ManagedSession } from '../shared/types';
+import { getConfig, updateConfig } from './config/config';
 
 const ensureId = (session: ManagedSession | Omit<ManagedSession, 'id'>): ManagedSession => {
   if ('id' in session && session.id) return session as ManagedSession;
@@ -8,14 +8,14 @@ const ensureId = (session: ManagedSession | Omit<ManagedSession, 'id'>): Managed
 };
 
 export const listManagedSessions = async (): Promise<ManagedSession[]> => {
-  const config = await loadConfig();
+  const config = (await getConfig()) as Config;
   return config.sessions ?? [];
 };
 
 export const saveManagedSession = async (
   session: ManagedSession | Omit<ManagedSession, 'id'>
 ): Promise<ManagedSession[]> => {
-  const config = await loadConfig();
+  const config = (await getConfig()) as Config;
   const existing = config.sessions ?? [];
   const record = ensureId(session);
   const idx = existing.findIndex((s) => s.id === record.id);
@@ -25,13 +25,13 @@ export const saveManagedSession = async (
   } else {
     next.push(record);
   }
-  await saveConfig({ sessions: next });
+  await updateConfig({ sessions: next } as Partial<Config>);
   return next;
 };
 
 export const removeManagedSession = async (id: string): Promise<ManagedSession[]> => {
-  const config = await loadConfig();
+  const config = (await getConfig()) as Config;
   const next = (config.sessions ?? []).filter((s) => s.id !== id);
-  await saveConfig({ sessions: next });
+  await updateConfig({ sessions: next } as Partial<Config>);
   return next;
 };

@@ -11,6 +11,19 @@ import { formatTemplate, sendTelegramMessage } from '../integrations/telegram';
 import { heartbeat, startWatchdog, stopWatchdog } from './watchdog';
 import { registerSessionPage, unregisterSessionPage } from './selectorInspector';
 import { runPostDownloadHook } from './hooks';
+import { ensureDir } from '../utils/fs';
+import { logInfo } from '../logging/logger';
+import { resolveSessionCdpPort } from '../utils/ports';
+
+function delay(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function assertPage(page: Page | null): asserts page is Page {
+  if (!page) {
+    throw new Error('No active page');
+  }
+}
 
 export type DownloadRunResult = {
   ok: boolean;
@@ -27,10 +40,6 @@ const MAX_WATCHDOG_RESTARTS = 2;
 
 type CancelFlag = { cancelled: boolean };
 const cancellationMap = new Map<string, CancelFlag>();
-
-async function ensureDir(target: string): Promise<void> {
-  await fs.mkdir(target, { recursive: true });
-}
 
 async function readLines(filePath: string): Promise<string[]> {
   try {
@@ -122,7 +131,7 @@ async function findLatestMp4(downloadDir: string): Promise<string | null> {
   return latest?.file ?? null;
 }
 
-export async function runDownloads(session: Session, maxVideos: number): Promise<DownloadRunResult> {
+export async function runDownloads(session: Session, maxVideos = 0): Promise<DownloadRunResult> {
   const cancelFlag: CancelFlag = { cancelled: false };
   cancellationMap.set(session.id, cancelFlag);
 
@@ -143,7 +152,7 @@ export async function runDownloads(session: Session, maxVideos: number): Promise
       return { ok: false, downloaded, error: 'No Chrome profile available' };
     }
 
-    const cdpPort = session.cdpPort ?? (config as Partial<{ cdpPort: number }>).cdpPort ?? DEFAULT_CDP_PORT;
+    const cdpPort = resolveSessionCdpPort(session, (config as Partial<{ cdpPort: number }>).cdpPort ?? DEFAULT_CDP_PORT);
     browser = await launchBrowserForSession(profile, cdpPort);
 
     const prepare = async () => {
@@ -176,26 +185,36 @@ export async function runDownloads(session: Session, maxVideos: number): Promise
     await prepare();
     startWatchdog(runId, WATCHDOG_TIMEOUT_MS, onTimeout);
 
-    const limit = (count: number) =>
-      Math.min(count, titles.length, Number.isFinite(maxVideos) && maxVideos > 0 ? maxVideos : Number.POSITIVE_INFINITY);
+    const explicitCap = Number.isFinite(maxVideos) && maxVideos > 0 ? maxVideos : 0;
+    const fallbackCap = Number.isFinite(session.maxVideos) && session.maxVideos > 0 ? session.maxVideos : 0;
+    const hardCap = explicitCap > 0 ? explicitCap : fallbackCap;
 
     for (let index = 0; !fatalWatchdog; index += 1) {
       if (cancelFlag.cancelled) break;
       if (!page) break;
 
+      if (hardCap > 0 && downloaded >= hardCap) {
+        logInfo('downloader', `Reached download limit ${hardCap} for session ${session.name}`);
+        break;
+      }
+
       heartbeat(runId);
-      const cards = await page.$$(CARD_SELECTOR);
-      if (cards.length === 0 || index >= limit(cards.length)) break;
+      assertPage(page);
+      const activePage = page as any;
+      const cards = await activePage.$$(CARD_SELECTOR);
+      const remaining = hardCap > 0 ? Math.max(hardCap - downloaded, 0) : Number.POSITIVE_INFINITY;
+      const maxCount = Math.min(cards.length, titles.length, remaining);
+      if (cards.length === 0 || index >= maxCount) break;
 
       const card = cards[index];
       const title = titles[index] || `video_${index + 1}`;
 
       try {
         await card.click();
-        await page.waitForSelector(DOWNLOAD_BUTTON_SELECTOR, { timeout: 60_000 });
+        await activePage.waitForSelector(DOWNLOAD_BUTTON_SELECTOR, { timeout: 60_000 });
 
         const downloadPromise = waitForDownload(page, config.downloadTimeoutMs);
-        await page.click(DOWNLOAD_BUTTON_SELECTOR);
+        await activePage.click(DOWNLOAD_BUTTON_SELECTOR);
         await downloadPromise;
 
         const latest = await findLatestMp4(paths.downloadDir);
@@ -214,7 +233,7 @@ export async function runDownloads(session: Session, maxVideos: number): Promise
       }
 
       heartbeat(runId);
-      await page.waitForTimeout(1000);
+      await delay(1000);
     }
 
     if (fatalWatchdog) {
@@ -244,10 +263,14 @@ export async function runDownloads(session: Session, maxVideos: number): Promise
     cancellationMap.delete(session.id);
     unregisterSessionPage(session.id, page);
     if (browser) {
-      try {
-        await browser.close();
-      } catch {
-        // ignore
+      const meta = browser as any;
+      const wasExisting = meta.__soraAlreadyRunning === true || meta.__soraManaged === true;
+      if (!wasExisting) {
+        try {
+          await browser.close();
+        } catch {
+          // ignore
+        }
       }
     }
   }

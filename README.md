@@ -1,74 +1,78 @@
 # Sora Desktop
 
-A modern Electron + React desktop shell for Sora automation. It ships with session-aware Chrome profiles, prompt and download pipelines, watermark previews, and Telegram configuration in a dark admin UI.
+Electron + React настольное приложение для автоматизации работы с Sora: управление сессиями и Chrome‑профилями, отправка промптов, скачивание черновиков, watermark/blur/merge и Telegram‑уведомления через удобный UI.
 
-## Features
-- Electron main process with context-isolated preload bridge for safe IPC.
-- React 19 + Vite renderer styled with Tailwind (dark admin theme).
-- Session manager for per-profile prompt/title files, downloads, and logs.
-- Puppeteer-based automation stubs for prompt submission and draft downloads.
-- Watermark preview generation and Telegram test hooks via IPC.
+## Страницы приложения
+- **Dashboard** — ежедневная статистика (промпты/скачивания/ошибки), мини‑граф активности, ТОП‑сессии и статус пайплайна.
+- **Sessions** — полный CRUD по `ManagedSession` (id, name, chromeProfileName, promptProfile, cdpPort, maxVideos, файлы prompts/titles/image_prompts, submitted/failed логи, downloadDir/cleanDir, cursor, openDrafts, autoLaunchChrome, autoLaunchAutogen, notes, status). Запуск/стоп Autogen и Downloader, health‑check, клон сессии.
+- **Content** — редактор промптов/тайтлов/image‑промптов, привязанных к активному Chrome‑профилю; счётчики строк, сохранение/перезагрузка файлов.
+- **Automator** — конструктор Pipeline со шагами `session_prompts`, `session_images`, `session_mix`, `session_download`, `session_watermark`, `session_chrome`, `global_blur`, `global_merge`; поддержка нескольких sessionIds, лимит скачек (0 = без ограничения), драй‑ран и прогресс онлайне.
+- **Downloader** — ручной запуск загрузчика с лимитом скачек и мониторингом статуса.
+- **Watermark / Blur** — предпросмотр кадров, blur‑профили, вызов скриптов очистки водяных знаков.
+- **Telegram** — токен, chat id, чекбоксы нотификаций (finish/error/watchdog/cleanup), тестовые сообщения.
+- **Logs** — потоковые логи с фильтрами по уровню/источнику, экспорт/открытие папки логов.
+- **Settings** — sessionsRoot, chromeExecutablePath, chromeUserDataDir, chromeActiveProfileName, ffmpegPath, тайминги (promptDelayMs, draftTimeoutMs, downloadTimeoutMs, maxParallelSessions), cleanup, Telegram и Chrome профили.
 
-## Prerequisites
-- Node.js 18+ and npm.
-- Google Chrome/Chromium (path configurable in settings).
-- ffmpeg available if you plan to generate watermark preview frames.
+## Доступ к Sora (Chrome профили)
+1. Установите `chromeExecutablePath` в Settings (путь до системного Chrome/Chromium).
+2. Нажмите «Scan profiles» — приложение через `scanChromeProfiles` найдёт профили (`Default`, `Profile X` и т.д.), кеширует их (cachedProfiles) и выделит активный по `chromeActiveProfileName`.
+3. Базовые настройки профилей:
+   - `chromeUserDataDir` — базовая папка профилей (можно оставить автоопределение, либо указать вручную).
+   - `chromeActiveProfileName` — имя профиля (Default / Profile 1 / ...), выбирается в Settings.
+4. Чтобы Sora была доступна в автоматизации:
+   - Откройте обычный Chrome, авторизуйтесь в Sora в нужном профиле (например, Default или Profile 1).
+   - Убедитесь, что этот профиль виден в списке профилей приложения и выбран активным.
+   - Можно использовать профиль напрямую (режим системных профилей) или предпочесть клонирование (см. ниже).
 
-## Quick start (auto-setup)
-Use the provided helper script to install dependencies and start the dev environment (Vite + Electron):
+## Клонирование профиля Chrome для Sora
+- В Settings есть кнопка **«Clone Chrome profile for Sora»**.
+- При нажатии активный системный профиль копируется в отдельную директорию (клон) внутри `sessionsRoot` (например, `chrome-clones/<profile-slug>`).
+- Копия сохраняет логины/куки/настройки Sora; все дальнейшие автозапуски Puppeteer используют именно этот клон.
+- Основной профиль не трогаем: меньше риска повредить системный Chrome и снимаются ошибки DevTools/SingletonLock.
+- После клонирования приложение пересканирует профили, отметит клон активным (`chromeActiveProfileName` обновляется), а `chromeUserDataDir` указывает на корень клонов.
 
-```bash
-./start.sh
-```
+## Что сохраняется в кеше
+- Браузерный кеш/куки/логины/история живут в папке `userDataDir/profileDirectory` (указано в профиле). Приложение их не чистит и не удаляет при запуске.
+- Кеш профилей (cachedProfiles) — это список найденных профилей; он пересканируется после изменения настроек или клонирования.
 
-The script will run `npm install` if needed and then `npm run dev`, which starts the Vite renderer on port 5173 and launches Electron pointing at it.
+## Проблемы и решения
+- **Failed to create SingletonLock / ProcessSingleton** — закройте все процессы Chrome перед автозапуском или используйте клонированный профиль (рекомендуется).
+- **DevTools remote debugging requires a non-default data directory** — запустили с системным `user-data-dir`. Используйте функцию клонирования или отдельный `chromeUserDataDir` для Sora.
+- **Профиль не виден** — проверьте `chromeExecutablePath` и `chromeUserDataDir`, повторите «Scan profiles».
 
-## Manual workflow
-Install dependencies (first time):
-
+## Установка и запуск
 ```bash
 npm install
 ```
 
-Run the app in development (Vite + Electron with hot reload):
-
+### Dev (Electron)
 ```bash
 npm run dev
 ```
+- Собирает main‑процесс (`dist-electron/electron/main.js`), поднимает Vite на `http://localhost:5173` и открывает окно Electron с preload‑мостом.
+- Открывать URL в браузере не нужно: в браузере сработает ElectronGuard и предупредит об отсутствии backend.
 
-Build production assets:
-
+### Production build
 ```bash
 npm run build
 ```
+- Собирает рендерер (`vite build`), main‑процесс (`tsc -p tsconfig.electron.json`) и упаковывает electron-builder. Готовые артефакты — в `dist/` (рендерер) и итоговый инсталлятор в `dist/` (например, `dist/mac-arm64/`).
 
-## Project structure
-- `electron/` – main process, preload bridge, automation, config, and session management.
-- `src/` – React renderer pages and Zustand store.
-- `shared/` – shared TypeScript types between main and renderer.
-- `tailwind.config.cjs`, `postcss.config.cjs` – styling pipeline.
-- `tsconfig.json`, `tsconfig.electron.json` – TypeScript configs for renderer and Electron.
-
-## Configuration
-At runtime the app stores user configuration (session root, Chrome/ffmpeg paths, timing settings, Telegram tokens, etc.) in the Electron `userData` directory. Adjust paths and timings from the Settings page inside the app; updates persist to disk.
-
-## Sessions and data
-Each session lives under the configured sessions root:
-
+## Структура данных сессий
 ```
-<sessionsRoot>/<sessionName>/
+<sessionsRoot>/<session-slug>/
   prompts.txt
   image_prompts.txt
   titles.txt
   submitted.log
   failed.log
-  profile/
+  cursor.json
   downloads/
+  clean/
 ```
+Редактирование файлов и запуск автоматизации выполняются через страницы Sessions и Content. Логи доступны в Logs.
 
-Use the Sessions and Content pages to edit files, run prompt submissions, and trigger draft downloads. Logs accumulate per session.
-
-## Notes
-- The automation flows assume you are signed into Sora in the selected Chrome profile.
-- Puppeteer uses `chromeExecutablePath` from the Settings config; set it before running automation.
-- Watermark previews rely on ffmpeg; if absent, the IPC call will fail gracefully.
+## Мини-FAQ
+- **Sora не открывается в автоматизации** — проверьте активный профиль, авторизацию Sora и при необходимости выполните клонирование профиля.
+- **Куки слетают** — используйте один и тот же клон профиля; приложение не чистит его содержимое.
+- **Нужно сменить профиль** — выберите другой профиль в Settings (или заново клонируйте) и повторно сохраните конфиг.
