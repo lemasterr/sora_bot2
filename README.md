@@ -2,58 +2,63 @@
 
 A modern Electron + React desktop shell for Sora automation. It ships with session-aware Chrome profiles, prompt and download pipelines, watermark previews, and Telegram configuration in a dark admin UI.
 
-## Features
+## Возможности
 - Electron main process with context-isolated preload bridge for safe IPC.
 - React 19 + Vite renderer styled with Tailwind (dark admin theme).
 - Session manager for per-profile prompt/title files, downloads, and logs.
-- Puppeteer-based automation stubs for prompt submission and draft downloads.
+- Puppeteer-based automation for prompt submission and draft downloads.
 - Watermark preview generation and Telegram test hooks via IPC.
 
-## Prerequisites
-- Node.js 18+ and npm.
-- Google Chrome/Chromium (path configurable in settings).
-- ffmpeg available if you plan to generate watermark preview frames.
+## Требования
+- Node.js 18+ и npm.
+- Google Chrome/Chromium (путь задаётся в настройках).
+- ffmpeg, если планируется генерация предпросмотров водяных знаков.
 
-## Quick start (auto-setup)
-Use the provided helper script to install dependencies and start the dev environment (Vite + Electron):
+## Запуск приложения
 
+### Запуск в режиме разработки (Electron)
+1. Установите зависимости:
+   ```bash
+   npm install
+   ```
+2. Запустите приложение:
+   ```bash
+   npm run dev
+   ```
+   Эта команда собирает main-процесс, поднимает Vite на `http://localhost:5173` и автоматически открывает окно Electron с подключённым preload‑мостом.
+
+При желании можно использовать вспомогательный скрипт:
 ```bash
 ./start.sh
 ```
+Он выполняет те же действия (установка зависимостей при необходимости и запуск `npm run dev`).
 
-The script will run `npm install` if needed and then `npm run dev`, which starts the Vite renderer on port 5173 and launches Electron pointing at it.
+### Сборка продакшн-версии
+1. Убедитесь, что зависимости установлены:
+   ```bash
+   npm install
+   ```
+2. Выполните сборку:
+   ```bash
+   npm run build
+   ```
+   Готовую сборку ищите в каталоге `dist/` (рендерер) и итоговый установочный пакет — в `dist/` после работы electron-builder (например, `dist/mac-arm64/`).
 
-## Manual workflow
-Install dependencies (first time):
+### Зачем нужен ElectronGuard
+Основной сценарий — запуск внутри Electron. При открытии `http://localhost:5173` напрямую в браузере preload не доступен, поэтому в интерфейсе показывается предупреждение о необходимости запустить десктопное приложение. Этого можно избежать, используя только `npm run dev` или собранный пакет.
 
-```bash
-npm install
-```
+## Структура проекта
+- `electron/` – main процесс, preload, автоматизация, конфиг и управление сессиями.
+- `src/` – React-рендерер и Zustand store.
+- `shared/` – общие типы TypeScript между main и renderer.
+- `tailwind.config.cjs`, `postcss.config.cjs` – настройка стилей.
+- `tsconfig.json`, `tsconfig.electron.json` – конфигурации TypeScript для рендерера и Electron.
 
-Run the app in development (Vite + Electron with hot reload):
+## Конфигурация
+Во время работы приложение хранит конфиг (корневая папка сессий, пути Chrome/ffmpeg, тайминги, токены Telegram и т.д.) в каталоге `userData` Electron. Изменения вносятся на странице Settings и сохраняются на диск.
 
-```bash
-npm run dev
-```
-
-Build production assets:
-
-```bash
-npm run build
-```
-
-## Project structure
-- `electron/` – main process, preload bridge, automation, config, and session management.
-- `src/` – React renderer pages and Zustand store.
-- `shared/` – shared TypeScript types between main and renderer.
-- `tailwind.config.cjs`, `postcss.config.cjs` – styling pipeline.
-- `tsconfig.json`, `tsconfig.electron.json` – TypeScript configs for renderer and Electron.
-
-## Configuration
-At runtime the app stores user configuration (session root, Chrome/ffmpeg paths, timing settings, Telegram tokens, etc.) in the Electron `userData` directory. Adjust paths and timings from the Settings page inside the app; updates persist to disk.
-
-## Sessions and data
-Each session lives under the configured sessions root:
+## Сессии и данные
+Каждая сессия лежит в настроенной `sessionsRoot`:
 
 ```
 <sessionsRoot>/<sessionName>/
@@ -66,9 +71,9 @@ Each session lives under the configured sessions root:
   downloads/
 ```
 
-Use the Sessions and Content pages to edit files, run prompt submissions, and trigger draft downloads. Logs accumulate per session.
+Используйте страницы Sessions и Content для редактирования файлов, отправки промтов и запуска скачивания черновиков. Логи копятся по каждой сессии.
 
-## Notes
-- The automation flows assume you are signed into Sora in the selected Chrome profile.
-- Puppeteer uses `chromeExecutablePath` from the Settings config; set it before running automation.
-- Watermark previews rely on ffmpeg; if absent, the IPC call will fail gracefully.
+## Примечания
+- Автоматизация предполагает, что вы авторизованы в Sora в выбранном профиле Chrome.
+- Puppeteer использует `chromeExecutablePath` из настроек — укажите его перед запуском автоматизации.
+- Водяные знаки требуют ffmpeg; если его нет, IPC вернёт контролируемую ошибку.
