@@ -6,6 +6,7 @@ import puppeteer, { type Browser } from 'puppeteer-core';
 
 import { launchChromeWithCDP, waitForCDP } from '../../core/chrome/chromeLauncher';
 import { ChromeProfile, resolveProfileLaunchTarget } from './profiles';
+import { logInfo } from '../../core/utils/log';
 
 const CDP_HOST = '127.0.0.1';
 
@@ -180,10 +181,9 @@ async function ensureChromeWithCDP(profile: ChromeProfile, port: number): Promis
   if (activePort) {
     const activeEndpoint = `http://${CDP_HOST}:${activePort}`;
     if (await isEndpointAvailable(activeEndpoint)) {
-      console.info('[chrome] detected existing DevTools port for profile', {
-        activeEndpoint,
-        requestedPort: port,
-      });
+      logInfo(
+        `[chrome] detected existing DevTools port for profile: ${activeEndpoint} (requested ${port})`
+      );
       return { endpoint: activeEndpoint, alreadyRunning: true };
     }
   }
@@ -224,11 +224,9 @@ async function ensureChromeWithCDP(profile: ChromeProfile, port: number): Promis
   await waitForCDP(port);
 
   const resolvedEndpoint = `http://${CDP_HOST}:${launchResult.cdpPort}`;
-  console.info('[chrome] spawned browser for CDP', {
-    userDataDir,
-    profileDirectory: profileDirectoryArg,
-    cdpPort: launchResult.cdpPort,
-  });
+  logInfo(
+    `[chrome] spawned browser for CDP | userDataDir=${userDataDir} profileDirectory=${profileDirectoryArg ?? 'Default'} port=${launchResult.cdpPort}`
+  );
 
   return { endpoint: resolvedEndpoint, alreadyRunning: false, childPid: launchResult.pid };
 }
@@ -279,11 +277,11 @@ export async function getOrLaunchChromeForProfile(profile: ChromeProfile, port: 
     }
   });
 
-  console.info('[chrome] connected to CDP', {
-    endpoint,
-    userDataDir: profile.userDataDir,
-    profileDirectory: profile.profileDirectory ?? profile.profileDir ?? 'Default',
-  });
+  logInfo(
+    `[chrome] connected to CDP | endpoint=${endpoint} userDataDir=${profile.userDataDir} profileDirectory=${
+      profile.profileDirectory ?? profile.profileDir ?? 'Default'
+    }`
+  );
 
   return browser;
 }
@@ -295,11 +293,11 @@ export async function attachExistingChromeForProfile(
   const key = instanceKey(profile);
   const existing = activeInstances.get(key);
 
-  console.info('[chrome] attachExistingChromeForProfile: checking activeInstances', {
-    key,
-    hasExisting: !!existing,
-    isConnected: !!existing?.browser?.isConnected(),
-  });
+  logInfo(
+    `[chrome] attachExistingChromeForProfile: checking activeInstances key=${key} hasExisting=${!!existing} isConnected=${
+      !!existing?.browser?.isConnected()
+    }`
+  );
 
   // Если уже есть подключённый браузер для этого профиля — просто используем его
   if (existing && existing.browser.isConnected()) {
@@ -314,30 +312,23 @@ export async function attachExistingChromeForProfile(
     targetEndpoint = requestedEndpoint;
   } else {
     const activePort = await findDevToolsActivePort(new Set([userDataDir, profile.userDataDir].filter(Boolean)));
-    console.info('[chrome] attachExistingChromeForProfile: DevToolsActivePort read', {
-      userDataDir,
-      activePort,
-      requestedPort: port,
-    });
+    logInfo(
+      `[chrome] attachExistingChromeForProfile: DevToolsActivePort read userDataDir=${userDataDir} activePort=${activePort} requestedPort=${port}`
+    );
     if (activePort) {
       const activeEndpoint = `http://${CDP_HOST}:${activePort}`;
       if (await isEndpointAvailable(activeEndpoint)) {
         targetEndpoint = activeEndpoint;
-        console.info('[chrome] attaching to detected DevTools port for profile', {
-          activeEndpoint,
-          requestedPort: port,
-        });
+        logInfo(
+          `[chrome] attaching to detected DevTools port for profile activeEndpoint=${activeEndpoint} requestedPort=${port}`
+        );
       }
     }
   }
 
   if (!targetEndpoint) {
-    console.warn(
-      '[chrome] attachExistingChromeForProfile: no DevTools endpoint found, falling back to getOrLaunchChromeForProfile',
-      {
-        requestedPort: port,
-        userDataDir,
-      }
+    logInfo(
+      `[chrome] attachExistingChromeForProfile: no DevTools endpoint found, falling back to getOrLaunchChromeForProfile requestedPort=${port} userDataDir=${userDataDir}`
     );
 
     return getOrLaunchChromeForProfile(profile, port);
@@ -370,11 +361,11 @@ export async function attachExistingChromeForProfile(
     }
   });
 
-  console.info('[chrome] attached to existing Chrome', {
-    endpoint: targetEndpoint,
-    userDataDir: profile.userDataDir,
-    profileDirectory: profile.profileDirectory ?? profile.profileDir ?? 'Default',
-  });
+  logInfo(
+    `[chrome] attached to existing Chrome | endpoint=${targetEndpoint} userDataDir=${profile.userDataDir} profileDirectory=${
+      profile.profileDirectory ?? profile.profileDir ?? 'Default'
+    }`
+  );
 
   return browser;
 }

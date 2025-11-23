@@ -7,6 +7,7 @@ import { configureDownloads, newPage, type SessionRunContext } from './chromeCon
 import { getOrLaunchChromeForProfile } from '../chrome/manager';
 import { resolveSessionCdpPort } from '../utils/ports';
 import { resolveChromeProfileForSession, type ChromeProfile } from '../chrome/profiles';
+import { logError } from '../../core/utils/log';
 
 const delay = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
 
@@ -58,7 +59,7 @@ const closeBrowserSafe = async (browser: Browser | null) => {
       await browser.disconnect();
     }
   } catch (error) {
-    console.error('Failed to close browser', error);
+    logError('Failed to close browser', error);
   }
 };
 
@@ -341,7 +342,7 @@ const downloadDraftCard = async (
   try {
     await page.keyboard.press('Escape');
   } catch (error) {
-    console.warn('Failed to close draft modal', error);
+    logError('Failed to close draft modal', error);
   }
 
   return targetPath;
