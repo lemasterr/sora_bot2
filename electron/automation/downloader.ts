@@ -212,13 +212,26 @@ async function getDraftCards(page: Page): Promise<ElementHandle<Element>[]> {
 async function goToNextVideoLikeTikTok(page: Page): Promise<boolean> {
   const previousUrl = page.url();
 
+  // Swipe upward (scrolling the feed up) to move to the next video, similar to
+  // TikTok's gesture. This direction proved more reliable than scrolling down
+  // when the viewer stays in place after the first download.
   await page.evaluate(() => {
-    window.scrollBy(0, window.innerHeight * 0.8);
+    window.scrollBy(0, -window.innerHeight * 0.85);
   });
 
-  await delay(1500);
+  await delay(1800);
 
-  const newUrl = page.url();
+  let newUrl = page.url();
+  if (newUrl !== previousUrl) {
+    return true;
+  }
+
+  // Fallback: try a PageDown key press to nudge the viewer if the URL didn't
+  // change after the upward swipe.
+  await page.keyboard.press('PageDown').catch(() => undefined);
+  await delay(1200);
+
+  newUrl = page.url();
   return newUrl !== previousUrl;
 }
 
