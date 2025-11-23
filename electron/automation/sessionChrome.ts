@@ -24,9 +24,10 @@ function pickProfileByName(profiles: ChromeProfile[], name: string): ChromeProfi
   );
 }
 
-function resolvePort(config?: Config | null): number {
-  const port = Number(config?.cdpPort ?? FALLBACK_CDP_PORT);
-  return Number.isFinite(port) ? port : FALLBACK_CDP_PORT;
+function resolvePort(session: Session, config?: Config | null): number {
+  const candidate = session.cdpPort ?? config?.cdpPort ?? FALLBACK_CDP_PORT;
+  const port = Number(candidate);
+  return Number.isFinite(port) && port > 0 ? port : FALLBACK_CDP_PORT;
 }
 
 async function resolveProfile(
@@ -52,7 +53,7 @@ export async function ensureBrowserForSession(
 ): Promise<{ browser: Browser; profile: ChromeProfile; port: number; config: Config }> {
   const resolvedConfig = config ?? (await getConfig());
   const { profile } = await resolveProfile(session, resolvedConfig);
-  const port = resolvePort(resolvedConfig);
+  const port = resolvePort(session, resolvedConfig);
   const browser = await getOrLaunchChromeForProfile(profile, port);
 
   return { browser, profile, port, config: resolvedConfig };
