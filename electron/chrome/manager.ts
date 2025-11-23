@@ -23,6 +23,11 @@ type ChromeInstance = {
 
 const activeInstances = new Map<string, ChromeInstance>();
 
+function isProfileDirInUse(userDataDir: string): boolean {
+  const lockFiles = ['SingletonLock', 'SingletonCookie', 'SingletonSocket'];
+  return lockFiles.some((file) => fs.existsSync(path.join(userDataDir, file)));
+}
+
 async function terminateSpawnedProcess(pid?: number): Promise<void> {
   if (!pid) return;
 
@@ -97,6 +102,13 @@ async function ensureChromeWithCDP(profile: ChromeProfile, port: number): Promis
 
   if (!fs.existsSync(userDataDir)) {
     throw new Error(`Chrome profile directory not found at ${userDataDir}. Please re-select the profile in Settings.`);
+  }
+
+  if (isProfileDirInUse(userDataDir)) {
+    throw new Error(
+      `Chrome is already running for profile data at ${userDataDir}. ` +
+        `Close all Chrome windows for this profile, then use "Start Chrome" so we can enable remote debugging on port ${port}.`
+    );
   }
 
   if (profileDirectoryArg) {
