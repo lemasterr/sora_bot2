@@ -6,6 +6,7 @@ import path from 'path';
 import { getConfig } from '../config/config';
 import type { ManagedSession } from '../../shared/types';
 import { Session } from './types';
+import { ensureDir } from '../utils/fs';
 
 const SESSIONS_FILE = 'sessions.json';
 
@@ -37,6 +38,90 @@ async function writeSessionsFile(sessions: Session[]): Promise<void> {
   const filePath = await getSessionsFilePath();
   await fs.mkdir(path.dirname(filePath), { recursive: true });
   await fs.writeFile(filePath, JSON.stringify(sessions, null, 2), 'utf-8');
+}
+
+async function normalizeSessions(sessions: Session[]): Promise<Session[]> {
+  const config = await getConfig();
+  let changed = false;
+  const normalized: Session[] = [];
+
+  for (const session of sessions) {
+    const { normalized: next, changed: sessionChanged } = await applySessionDefaults(session, config.sessionsRoot);
+    normalized.push(next);
+    changed = changed || sessionChanged;
+  }
+
+  if (changed) {
+    await writeSessionsFile(normalized);
+  }
+
+  return normalized;
+}
+
+function slugifySessionName(name: string): string {
+  const normalized = name.trim().toLowerCase().replace(/\s+/g, '-').replace(/[^a-z0-9-_]/gi, '');
+  return normalized.length > 0 ? normalized : 'session';
+}
+
+async function ensureFile(filePath: string): Promise<void> {
+  try {
+    await fs.access(filePath);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException)?.code === 'ENOENT') {
+      await ensureDir(path.dirname(filePath));
+      await fs.writeFile(filePath, '', 'utf-8');
+      return;
+    }
+    throw error;
+  }
+}
+
+async function applySessionDefaults(session: Session, sessionsRoot: string): Promise<{ normalized: Session; changed: boolean }>
+ {
+  const slug = slugifySessionName(session.name || session.id || 'session');
+  const baseRel = path.join(slug);
+
+  const next: Session = { ...session };
+  let changed = false;
+
+  const setIfEmpty = (key: keyof Session, value: string | number | boolean | null) => {
+    const current = next[key];
+    if (current === undefined || current === null || current === '') {
+      next[key] = value as Session[keyof Session];
+      changed = true;
+    }
+  };
+
+  setIfEmpty('promptsFile', path.join(baseRel, 'prompts.txt'));
+  setIfEmpty('imagePromptsFile', path.join(baseRel, 'image_prompts.txt'));
+  setIfEmpty('titlesFile', path.join(baseRel, 'titles.txt'));
+  setIfEmpty('submittedLog', path.join(baseRel, 'submitted.log'));
+  setIfEmpty('failedLog', path.join(baseRel, 'failed.log'));
+  setIfEmpty('downloadDir', path.join(baseRel, 'downloads'));
+  setIfEmpty('cleanDir', path.join(baseRel, 'clean'));
+  setIfEmpty('cursorFile', path.join(baseRel, 'cursor.json'));
+  setIfEmpty('maxVideos', 0);
+  setIfEmpty('openDrafts', false);
+  setIfEmpty('autoLaunchChrome', false);
+  setIfEmpty('autoLaunchAutogen', false);
+  setIfEmpty('notes', '');
+
+  const resolve = (target: string) => (path.isAbsolute(target) ? target : path.join(sessionsRoot, target));
+  const sessionDir = path.join(sessionsRoot, slug);
+  await ensureDir(sessionDir);
+  await ensureDir(resolve(next.downloadDir));
+  await ensureDir(resolve(next.cleanDir));
+
+  await Promise.all([
+    ensureFile(resolve(next.promptsFile)),
+    ensureFile(resolve(next.imagePromptsFile)),
+    ensureFile(resolve(next.titlesFile)),
+    ensureFile(resolve(next.submittedLog)),
+    ensureFile(resolve(next.failedLog)),
+    ensureFile(resolve(next.cursorFile)),
+  ]);
+
+  return { normalized: next, changed };
 }
 
 function toManagedSession(session: Session, stats?: Partial<Pick<ManagedSession, 'promptCount' | 'titleCount' | 'hasFiles'>>): ManagedSession {
@@ -120,7 +205,7 @@ async function readFileLines(filePath: string): Promise<string[]> {
 }
 
 export async function listSessions(): Promise<ManagedSession[]> {
-  const sessions = await readSessionsFile();
+  const sessions = await normalizeSessions(await readSessionsFile());
   const enriched = await Promise.all(
     sessions.map(async (session) => toManagedSession(session, await computeSessionStats(session)))
   );
@@ -128,7 +213,7 @@ export async function listSessions(): Promise<ManagedSession[]> {
 }
 
 export async function getSession(id: string): Promise<ManagedSession | null> {
-  const sessions = await readSessionsFile();
+  const sessions = await normalizeSessions(await readSessionsFile());
   const match = sessions.find((s) => s.id === id);
   if (!match) return null;
   const stats = await computeSessionStats(match);
@@ -136,11 +221,13 @@ export async function getSession(id: string): Promise<ManagedSession | null> {
 }
 
 export async function saveSession(session: ManagedSession): Promise<ManagedSession> {
-  const sessions = await readSessionsFile();
-  const next: Session = {
+  const sessions = await normalizeSessions(await readSessionsFile());
+  const nextBase: Session = {
     ...fromManagedSession(session),
     id: session.id || randomUUID(),
   };
+
+  const { normalized: next } = await applySessionDefaults(nextBase, (await getConfig()).sessionsRoot);
 
   const existingIndex = sessions.findIndex((s) => s.id === next.id);
   if (existingIndex >= 0) {
@@ -162,7 +249,7 @@ export async function deleteSession(id: string): Promise<void> {
 
 export async function ensureSessionsRoot(): Promise<string> {
   const config = await getConfig();
-  await fs.mkdir(config.sessionsRoot, { recursive: true });
+  await ensureDir(config.sessionsRoot);
   return config.sessionsRoot;
 }
 
@@ -173,15 +260,16 @@ function resolvePath(root: string, target: string): string {
 
 export async function getSessionPaths(session: Session): Promise<Record<string, string>> {
   const root = await ensureSessionsRoot();
+  const { normalized } = await applySessionDefaults(session, root);
 
   return {
-    promptsFile: resolvePath(root, session.promptsFile),
-    imagePromptsFile: resolvePath(root, session.imagePromptsFile),
-    titlesFile: resolvePath(root, session.titlesFile),
-    submittedLog: resolvePath(root, session.submittedLog),
-    failedLog: resolvePath(root, session.failedLog),
-    downloadDir: resolvePath(root, session.downloadDir),
-    cleanDir: resolvePath(root, session.cleanDir),
-    cursorFile: resolvePath(root, session.cursorFile),
+    promptsFile: resolvePath(root, normalized.promptsFile),
+    imagePromptsFile: resolvePath(root, normalized.imagePromptsFile),
+    titlesFile: resolvePath(root, normalized.titlesFile),
+    submittedLog: resolvePath(root, normalized.submittedLog),
+    failedLog: resolvePath(root, normalized.failedLog),
+    downloadDir: resolvePath(root, normalized.downloadDir),
+    cleanDir: resolvePath(root, normalized.cleanDir),
+    cursorFile: resolvePath(root, normalized.cursorFile),
   };
 }

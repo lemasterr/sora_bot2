@@ -56,6 +56,12 @@ contextBridge.exposeInMainWorld('electronAPI', {
       return () => ipcRenderer.removeAllListeners('pipeline:progress');
     },
   },
+  window: {
+    minimize: (): Promise<unknown> => safeInvoke('window:minimize'),
+    maximize: (): Promise<unknown> => safeInvoke('window:maximize'),
+    isWindowMaximized: (): Promise<unknown> => safeInvoke('window:isMaximized'),
+    close: (): Promise<unknown> => safeInvoke('window:close'),
+  },
   logs: {
     subscribe: (cb: (entry: unknown) => void) => {
       const handler = (_event: unknown, entry: unknown) => {

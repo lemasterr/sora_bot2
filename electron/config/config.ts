@@ -2,6 +2,8 @@ import { app } from 'electron';
 import fs from 'fs/promises';
 import path from 'path';
 
+import { ensureDir } from '../utils/fs';
+
 export type Config = {
   sessionsRoot: string;
   chromeExecutablePath: string | null;
@@ -80,7 +82,7 @@ async function ensureAppReady(): Promise<void> {
 
 async function ensureConfigDir(): Promise<void> {
   await ensureAppReady();
-  await fs.mkdir(getUserDataPath(), { recursive: true });
+  await ensureDir(getUserDataPath());
 }
 
 export function getUserDataPath(): string {
@@ -121,7 +123,7 @@ export async function getConfig(): Promise<Config> {
     const raw = await fs.readFile(getConfigPath(), 'utf-8');
     const parsed = JSON.parse(raw) as Partial<Config>;
     const merged = mergeConfig(defaults, parsed);
-    await fs.mkdir(merged.sessionsRoot, { recursive: true });
+    await ensureDir(merged.sessionsRoot);
     cachedConfig = merged;
     return merged;
   } catch (error) {
@@ -130,7 +132,7 @@ export async function getConfig(): Promise<Config> {
     }
 
     await fs.writeFile(getConfigPath(), JSON.stringify(defaults, null, 2), 'utf-8');
-    await fs.mkdir(defaults.sessionsRoot, { recursive: true });
+    await ensureDir(defaults.sessionsRoot);
     cachedConfig = defaults;
     return defaults;
   }
@@ -140,7 +142,7 @@ export async function updateConfig(partial: Partial<Config>): Promise<Config> {
   const current = await getConfig();
   const next = mergeConfig(current, partial);
   await ensureConfigDir();
-  await fs.mkdir(next.sessionsRoot, { recursive: true });
+  await ensureDir(next.sessionsRoot);
   await fs.writeFile(getConfigPath(), JSON.stringify(next, null, 2), 'utf-8');
   cachedConfig = next;
   return next;

@@ -3,6 +3,7 @@ import path from 'path';
 import type { SessionFiles } from '../../shared/types';
 import { getConfig } from '../config/config';
 import { logError, logInfo } from '../logging/logger';
+import { ensureDir } from '../utils/fs';
 
 const DEFAULT_PROFILE = 'Default';
 const PROMPTS_DIR = 'prompts';
@@ -14,7 +15,7 @@ function normalizeProfileName(name?: string | null): string {
 
 async function ensurePromptsDir(sessionsRoot: string): Promise<string> {
   const dir = path.join(sessionsRoot, PROMPTS_DIR);
-  await fs.mkdir(dir, { recursive: true });
+  await ensureDir(dir);
   return dir;
 }
 

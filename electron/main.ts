@@ -143,6 +143,30 @@ handle('pipeline:cancel', async () => {
   return { ok: true };
 });
 
+handle('window:minimize', async () => {
+  mainWindow?.minimize();
+  return { ok: true };
+});
+
+handle('window:maximize', async () => {
+  if (!mainWindow) return { ok: false, error: 'No window' };
+  if (mainWindow.isMaximized()) {
+    mainWindow.unmaximize();
+  } else {
+    mainWindow.maximize();
+  }
+  return { ok: true, maximized: mainWindow.isMaximized() };
+});
+
+handle('window:isMaximized', async () => {
+  return mainWindow?.isMaximized() ?? false;
+});
+
+handle('window:close', async () => {
+  mainWindow?.close();
+  return { ok: true };
+});
+
 handle('video:extractPreviewFrames', async (videoPath: string, count: number) => extractPreviewFrames(videoPath, count));
 handle('video:pickSmartPreviewFrames', async (videoPath: string, count: number) => pickSmartPreviewFrames(videoPath, count));
 handle('video:blurWithProfile', async (input: string, output: string, profileId: string) =>

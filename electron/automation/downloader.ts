@@ -11,6 +11,8 @@ import { formatTemplate, sendTelegramMessage } from '../integrations/telegram';
 import { heartbeat, startWatchdog, stopWatchdog } from './watchdog';
 import { registerSessionPage, unregisterSessionPage } from './selectorInspector';
 import { runPostDownloadHook } from './hooks';
+import { ensureDir } from '../utils/fs';
+import { logInfo } from '../logging/logger';
 
 function delay(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -37,10 +39,6 @@ const MAX_WATCHDOG_RESTARTS = 2;
 
 type CancelFlag = { cancelled: boolean };
 const cancellationMap = new Map<string, CancelFlag>();
-
-async function ensureDir(target: string): Promise<void> {
-  await fs.mkdir(target, { recursive: true });
-}
 
 async function readLines(filePath: string): Promise<string[]> {
   try {
@@ -132,7 +130,7 @@ async function findLatestMp4(downloadDir: string): Promise<string | null> {
   return latest?.file ?? null;
 }
 
-export async function runDownloads(session: Session, maxVideos: number): Promise<DownloadRunResult> {
+export async function runDownloads(session: Session, maxVideos = 0): Promise<DownloadRunResult> {
   const cancelFlag: CancelFlag = { cancelled: false };
   cancellationMap.set(session.id, cancelFlag);
 
@@ -186,19 +184,25 @@ export async function runDownloads(session: Session, maxVideos: number): Promise
     await prepare();
     startWatchdog(runId, WATCHDOG_TIMEOUT_MS, onTimeout);
 
-    const hardCap = Number.isFinite(maxVideos) && maxVideos > 0 ? maxVideos : 0;
+    const explicitCap = Number.isFinite(maxVideos) && maxVideos > 0 ? maxVideos : 0;
+    const fallbackCap = Number.isFinite(session.maxVideos) && session.maxVideos > 0 ? session.maxVideos : 0;
+    const hardCap = explicitCap > 0 ? explicitCap : fallbackCap;
 
     for (let index = 0; !fatalWatchdog; index += 1) {
       if (cancelFlag.cancelled) break;
       if (!page) break;
 
-      if (hardCap > 0 && downloaded >= hardCap) break;
+      if (hardCap > 0 && downloaded >= hardCap) {
+        logInfo('downloader', `Reached download limit ${hardCap} for session ${session.name}`);
+        break;
+      }
 
       heartbeat(runId);
       assertPage(page);
       const activePage = page as any;
       const cards = await activePage.$$(CARD_SELECTOR);
-      const maxCount = Math.min(cards.length, titles.length, hardCap > 0 ? hardCap : Number.POSITIVE_INFINITY);
+      const remaining = hardCap > 0 ? Math.max(hardCap - downloaded, 0) : Number.POSITIVE_INFINITY;
+      const maxCount = Math.min(cards.length, titles.length, remaining);
       if (cards.length === 0 || index >= maxCount) break;
 
       const card = cards[index];

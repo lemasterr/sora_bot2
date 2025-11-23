@@ -11,8 +11,9 @@ export function TitleBar({ title, description, onToggleQuickAccess }: TitleBarPr
 
   useEffect(() => {
     const checkState = async () => {
-      if (window.electronAPI?.isWindowMaximized) {
-        const state = await window.electronAPI.isWindowMaximized();
+      const api = (window as any).electronAPI;
+      if (api?.window?.isWindowMaximized) {
+        const state = await api.window.isWindowMaximized();
         setIsMaximized(Boolean(state));
       }
     };
@@ -20,16 +21,16 @@ export function TitleBar({ title, description, onToggleQuickAccess }: TitleBarPr
     const handler = (_event: unknown, state: unknown) => setIsMaximized(Boolean(state));
 
     checkState();
-    window.electronAPI?.on?.('window:maximized', handler);
+    (window as any).electronAPI?.on?.('window:maximized', handler);
 
     return () => {
       // ipcRenderer removeListener not exposed; relies on single mounting in app lifecycle
     };
   }, []);
 
-  const handleMin = () => window.electronAPI?.windowMinimize?.();
-  const handleMax = () => window.electronAPI?.windowMaximize?.();
-  const handleClose = () => window.electronAPI?.windowClose?.();
+  const handleMin = () => (window as any).electronAPI?.window?.minimize?.();
+  const handleMax = () => (window as any).electronAPI?.window?.maximize?.();
+  const handleClose = () => (window as any).electronAPI?.window?.close?.();
 
   return (
     <header
