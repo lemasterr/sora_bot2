@@ -158,7 +158,7 @@ export async function runDownloads(session: Session, maxVideos = 0): Promise<Dow
       return { ok: false, downloaded, error: 'No Chrome profile available' };
     }
 
-    const cdpPort = resolveSessionCdpPort(session, (config as Partial<{ cdpPort: number }>).cdpPort ?? DEFAULT_CDP_PORT);
+    const cdpPort = resolveSessionCdpPort(session, config.cdpPort ?? DEFAULT_CDP_PORT);
     browser = await launchBrowserForSession(profile, cdpPort);
 
     const prepare = async () => {

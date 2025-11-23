@@ -84,7 +84,7 @@ async function getOrLaunchManualBrowser(session: Session): Promise<Browser> {
   }
 
   const config = await getConfig();
-  const safePort = resolveSessionCdpPort(session, (config as Partial<{ cdpPort: number }>).cdpPort ?? 9222);
+  const safePort = resolveSessionCdpPort(session, config.cdpPort ?? 9222);
   const browser = await launchBrowserForSession(profile, safePort);
   manualBrowsers.set(session.id, browser);
   return browser;
@@ -177,7 +177,7 @@ handle('sessions:command', async (sessionId: string, action: SessionCommandActio
   if (!session) return { ok: false, error: 'Session not found' };
 
   const config = await getConfig();
-  const safePort = resolveSessionCdpPort(session, (config as Partial<{ cdpPort: number }>).cdpPort ?? 9222);
+  const safePort = resolveSessionCdpPort(session, config.cdpPort ?? 9222);
 
   try {
     if (action === 'startChrome') {

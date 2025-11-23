@@ -10,6 +10,7 @@ export type Config = {
   chromeUserDataDir: string | null;
   chromeActiveProfileName: string | null;
   chromeClonedProfilesRoot?: string | null;
+  cdpPort: number | null;
   promptDelayMs: number;
   draftTimeoutMs: number;
   downloadTimeoutMs: number;
@@ -47,6 +48,7 @@ function defaultConfig(): Config {
     chromeUserDataDir: null,
     chromeActiveProfileName: null,
     chromeClonedProfilesRoot: path.join(defaultSessionsRoot, 'chrome-clones'),
+    cdpPort: 9222,
     promptDelayMs: 2000,
     draftTimeoutMs: 60_000,
     downloadTimeoutMs: 300_000,
