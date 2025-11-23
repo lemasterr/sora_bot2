@@ -120,7 +120,12 @@ export async function resolveProfileLaunchTarget(
   try {
     const stats = await fs.stat(profilePath);
     if (stats.isDirectory()) {
-      return { userDataDir: profilePath, profileDirectoryArg: profile.profileDirectory };
+      // When launching directly into an existing profile directory, Chrome
+      // treats that folder as the user-data-dir, so we must not also pass
+      // --profile-directory. Supplying both causes Chrome to ignore the
+      // supplied data dir and boot a fresh profile, which prevents users from
+      // reusing their already logged-in profiles.
+      return { userDataDir: profilePath };
     }
   } catch {
     // ignore and fall back below
