@@ -1,6 +1,6 @@
 import fs from 'fs/promises';
 import path from 'path';
-import puppeteer, { type Browser, type Page } from 'puppeteer-core';
+import { type Browser, type Page } from 'puppeteer-core';
 
 import { getConfig, type Config } from '../config/config';
 import { getSessionPaths } from '../sessions/repo';
@@ -11,6 +11,7 @@ import { registerSessionPage, unregisterSessionPage } from './selectorInspector'
 import { runPostDownloadHook } from './hooks';
 import { ensureDir } from '../utils/fs';
 import { logInfo } from '../logging/logger';
+import { ensureBrowserForSession } from './sessionChrome';
 
 function delay(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -38,7 +39,6 @@ const MENU_ITEM_SELECTOR = "[role='menuitem']";
 
 const DOWNLOAD_MENU_LABELS = ['Download', 'Скачать', 'Download video', 'Save video', 'Export'];
 
-const DEFAULT_CDP_PORT = 9222;
 const WATCHDOG_TIMEOUT_MS = 120_000;
 const MAX_WATCHDOG_RESTARTS = 2;
 
@@ -84,15 +84,6 @@ async function configureDownloads(page: Page, downloadsDir: string): Promise<voi
     behavior: 'allow',
     downloadPath: downloadsDir,
   });
-}
-
-function resolveCdpEndpoint(config: Config): string {
-  const envEndpoint = process.env.CDP_ENDPOINT?.trim();
-  if (envEndpoint) return envEndpoint;
-
-  const port = Number(config.cdpPort ?? DEFAULT_CDP_PORT);
-  const safePort = Number.isFinite(port) ? port : DEFAULT_CDP_PORT;
-  return `http://127.0.0.1:${safePort}`;
 }
 
 async function preparePage(browser: Browser, downloadDir: string): Promise<Page> {
@@ -338,14 +329,8 @@ export async function runDownloads(
   try {
     const [loadedConfig, paths] = await Promise.all([getConfig(), getSessionPaths(session)]);
     config = loadedConfig;
-    const cdpEndpoint = resolveCdpEndpoint(config);
 
-    const connected = (await puppeteer.connect({
-      browserURL: cdpEndpoint,
-      defaultViewport: null,
-    })) as Browser & { __soraManaged?: boolean };
-
-    connected.__soraManaged = false;
+    const { browser: connected } = await ensureBrowserForSession(session, config);
     browser = connected;
 
     const prepare = async () => {
