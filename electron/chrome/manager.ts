@@ -81,7 +81,21 @@ async function waitForEndpoint(endpoint: string, timeoutMs = 15000): Promise<voi
     if (await isEndpointAvailable(endpoint)) return;
     await delay(250);
   }
-  throw new Error(`Chrome CDP endpoint did not open at ${endpoint}`);
+  throw new Error(
+    [
+      `Chrome CDP endpoint did not open at ${endpoint}.`,
+      '',
+      'This usually means Chrome failed to start with remote debugging enabled.',
+      'Possible reasons:',
+      '  - Chrome is already running for this profile without "--remote-debugging-port".',
+      '  - The specified port is blocked by another process.',
+      '',
+      'Fix:',
+      '  1) Fully quit all Google Chrome windows for this profile (Cmd+Q on macOS, or "Quit" from the Dock).',
+      '  2) In the Sora Bot app, click "Start Chrome" again for this session.',
+      '  3) If the problem persists, try changing the "CDP port" in Settings to a free port (e.g., 9223) and restart the app.',
+    ].join('\n')
+  );
 }
 
 type LaunchInfo = { endpoint: string; alreadyRunning: boolean; childPid?: number };
@@ -129,8 +143,17 @@ async function ensureChromeWithCDP(profile: ChromeProfile, port: number): Promis
 
   if (isProfileDirInUse(userDataDir)) {
     throw new Error(
-      `Chrome is already running for profile data at ${userDataDir}. ` +
-        `Close all Chrome windows for this profile, then use "Start Chrome" so we can enable remote debugging on port ${port}.`
+      [
+        `Chrome is already running for profile data at: ${userDataDir}`,
+        '',
+        'To allow Sora Bot to control this profile, Chrome must be started with remote debugging enabled.',
+        'Steps:',
+        '  1) Fully quit Google Chrome for this profile:',
+        '     - On macOS: press Cmd+Q in Chrome, or right-click the Dock icon and choose "Quit".',
+        '     - Make sure there are no "Google Chrome" processes left in Activity Monitor.',
+        `  2) In the Sora Bot app, click "Start Chrome" for this session so we can launch Chrome with "--remote-debugging-port=${port}".`,
+        '  3) Then open https://sora.chatgpt.com in that Chrome window and run downloads/prompts again.',
+      ].join('\n')
     );
   }
 
