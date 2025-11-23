@@ -84,10 +84,10 @@ async function applySessionDefaults(session: Session, sessionsRoot: string): Pro
   const next: Session = { ...session };
   let changed = false;
 
-  const setIfEmpty = (key: keyof Session, value: string | number | boolean | null) => {
+  const setIfEmpty = <K extends keyof Session>(key: K, value: Session[K]) => {
     const current = next[key];
     if (current === undefined || current === null || current === '') {
-      next[key] = value as Session[keyof Session];
+      next[key] = value;
       changed = true;
     }
   };
