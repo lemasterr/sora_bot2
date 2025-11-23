@@ -6,8 +6,7 @@
   "scripts": {
     "dev": "concurrently -k \"npm:dev:renderer\" \"npm:dev:electron\"",
     "dev:renderer": "vite",
-    "dev:electron": "wait-on http://localhost:5173 && cross-env NODE_ENV=development TS_NODE_PROJECT=tsconfig.electron.json electron ./electron/dev-main.js",
-    "electron": "wait-on http://localhost:5173 && cross-env NODE_ENV=development TS_NODE_PROJECT=tsconfig.electron.json electron ./electron/dev-main.js",
+    "dev:electron": "npm run build:electron && wait-on http://localhost:5173 && electron ./dist-electron/main.js",
     "build": "npm run build:renderer && npm run build:electron && electron-builder",
     "build:renderer": "vite build",
     "build:electron": "tsc -p tsconfig.electron.json",
@@ -15,7 +14,6 @@
   },
   "dependencies": {
     "axios": "1.7.7",
-    "electron": "28.3.3",
     "fluent-ffmpeg": "2.1.3",
     "form-data": "4.0.0",
     "image-size": "1.1.1",
@@ -33,6 +31,7 @@
     "autoprefixer": "10.4.20",
     "concurrently": "8.2.2",
     "cross-env": "7.0.3",
+    "electron": "28.3.3",
     "electron-builder": "24.13.3",
     "postcss": "8.4.47",
     "tailwindcss": "3.4.14",

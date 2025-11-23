@@ -1,7 +1,7 @@
 import React from 'react';
 
 export const ElectronGuard: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-  const hasElectron = typeof (window as any).electronAPI !== 'undefined';
+  const hasElectron = typeof (window as any).electronAPI !== 'undefined' && (window as any).electronAPI !== null;
 
   if (!hasElectron) {
     return (

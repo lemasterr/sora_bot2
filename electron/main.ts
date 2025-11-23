@@ -20,9 +20,7 @@ let mainWindow: BrowserWindow | null = null;
 const isDev = process.env.NODE_ENV !== 'production';
 
 function createMainWindow(): void {
-  const preload = isDev
-    ? path.join(__dirname, 'dev-preload.js')
-    : path.join(__dirname, 'preload.js');
+  const preload = path.join(__dirname, 'preload.js');
 
   mainWindow = new BrowserWindow({
     width: 1280,
@@ -48,13 +46,27 @@ function createMainWindow(): void {
   });
 }
 
-app.whenReady().then(createMainWindow);
-app.whenReady().then(scheduleDailyCleanup);
+console.log('[main] starting, NODE_ENV=', process.env.NODE_ENV);
+
+app.whenReady()
+  .then(() => {
+    console.log('[main] app is ready, creating window');
+    createMainWindow();
+  })
+  .then(() => {
+    scheduleDailyCleanup();
+    console.log('[main] daily cleanup scheduled');
+  });
 
 app.on('window-all-closed', () => {
+  console.log('[main] window-all-closed');
   if (process.platform !== 'darwin') {
     app.quit();
   }
+});
+
+app.on('before-quit', () => {
+  console.log('[main] before-quit');
 });
 
 app.on('activate', () => {
