@@ -131,42 +131,12 @@ function annotateActive(
   });
 }
 
-/**
- * Resolve how we launch a Chrome profile for Puppeteer.
- *
- * Old behaviour (working in the previous build) pointed Puppeteer directly at the
- * profile directory (e.g. `${userDataDir}/Profile 1`) as the user-data-dir, which
- * avoids Chrome treating the default data dir as "unsafe" for remote debugging
- * and keeps existing Sora auth/session data intact. The newer build switched to
- * using the base userDataDir + `--profile-directory`, which triggered
- * `DevTools remote debugging requires a non-default data directory` and spun up
- * empty profiles for some users. The helper below restores the old launch path
- * while keeping the newer cached profile discovery intact.
- */
 export async function resolveProfileLaunchTarget(
   profile: ChromeProfile
 ): Promise<{ userDataDir: string; profileDirectoryArg?: string }> {
-  // Prefer launching directly against the profile directory (base + profile
-  // folder) so Chrome reuses the full cache/cookies for the chosen profile.
-  // If that directory does not exist for some reason, fall back to the base
-  // userDataDir with a --profile-directory hint (keeps compatibility with the
-  // cached discovery data).
-  const profilePath = path.join(profile.userDataDir, profile.profileDirectory);
-
-  try {
-    const stats = await fs.stat(profilePath);
-    if (stats.isDirectory()) {
-      // When launching directly into an existing profile directory, Chrome
-      // treats that folder as the user-data-dir, so we must not also pass
-      // --profile-directory. Supplying both causes Chrome to ignore the
-      // supplied data dir and boot a fresh profile, which prevents users from
-      // reusing their already logged-in profiles.
-      return { userDataDir: profilePath };
-    }
-  } catch {
-    // ignore and fall back below
-  }
-
+  // Launch Chrome against the real user-data root and pass the profile
+  // directory explicitly so Chrome can read shared state from "Local State"
+  // and reuse the selected profile with its existing cookies/extensions.
   return { userDataDir: profile.userDataDir, profileDirectoryArg: profile.profileDirectory };
 }
 
