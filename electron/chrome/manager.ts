@@ -111,6 +111,14 @@ async function readDevToolsActivePort(userDataDir: string): Promise<number | nul
   }
 }
 
+async function findDevToolsActivePort(candidateDirs: Iterable<string>): Promise<number | null> {
+  for (const dir of candidateDirs) {
+    const port = await readDevToolsActivePort(dir);
+    if (port) return port;
+  }
+  return null;
+}
+
 async function ensureChromeWithCDP(profile: ChromeProfile, port: number): Promise<LaunchInfo> {
   const endpoint = `http://${CDP_HOST}:${port}`;
   if (await isEndpointAvailable(endpoint)) {
@@ -124,8 +132,7 @@ async function ensureChromeWithCDP(profile: ChromeProfile, port: number): Promis
   });
 
   const { userDataDir, profileDirectoryArg } = await resolveProfileLaunchTarget(profile);
-
-  const activePort = await readDevToolsActivePort(userDataDir);
+  const activePort = await findDevToolsActivePort(new Set([userDataDir, profile.userDataDir].filter(Boolean)));
   if (activePort) {
     const activeEndpoint = `http://${CDP_HOST}:${activePort}`;
     if (await isEndpointAvailable(activeEndpoint)) {
@@ -284,7 +291,7 @@ export async function attachExistingChromeForProfile(
   if (await isEndpointAvailable(requestedEndpoint)) {
     targetEndpoint = requestedEndpoint;
   } else {
-    const activePort = await readDevToolsActivePort(userDataDir);
+    const activePort = await findDevToolsActivePort(new Set([userDataDir, profile.userDataDir].filter(Boolean)));
     console.info('[chrome] attachExistingChromeForProfile: DevToolsActivePort read', {
       userDataDir,
       activePort,
