@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import type { ManagedSession, SessionLogEntry } from '../shared/types';
+import type { ManagedSession, SessionLogEntry } from '../../shared/types';
 
 interface SessionWindowProps {
   session: ManagedSession;
@@ -32,9 +32,10 @@ export function SessionWindow({ session, onClose }: SessionWindowProps) {
   };
 
   useEffect(() => {
-    if (!session.id || !window.electronAPI.sessions) return;
+    const api = window.electronAPI;
+    if (!session.id || !api?.sessions) return;
     setLogs([]);
-    const unsubscribe = window.electronAPI.sessions.subscribeLogs(session.id, appendLog);
+    const unsubscribe = api.sessions.subscribeLogs(session.id, appendLog);
     return () => {
       unsubscribe?.();
     };
@@ -48,10 +49,11 @@ export function SessionWindow({ session, onClose }: SessionWindowProps) {
   }, [logs]);
 
   const sendCommand = async (action: 'startChrome' | 'runPrompts' | 'runDownloads' | 'cleanWatermark' | 'stop') => {
-    if (!session.id || !window.electronAPI.sessions) return;
+    const api = window.electronAPI;
+    if (!session.id || !api?.sessions) return;
     setBusy(true);
     setMessage('');
-    const result = await window.electronAPI.sessions.command(session.id, action);
+    const result = await api.sessions.command(session.id, action);
     setBusy(false);
     setMessage(result.ok ? result.details || 'OK' : result.error || 'Error');
   };

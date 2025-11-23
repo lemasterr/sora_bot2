@@ -31,6 +31,7 @@ export interface ManagedSession {
   promptCount?: number;
   titleCount?: number;
   hasFiles?: boolean;
+  downloadedCount?: number;
 }
 
 // The Config type mirrors the canonical backend shape from electron/config/config.ts.

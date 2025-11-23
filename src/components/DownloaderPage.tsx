@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import type { ManagedSession, RunResult } from '../../shared/types';
+import type { DownloadedVideo, ManagedSession, RunResult } from '../../shared/types';
 import { useAppStore } from '../store';
 
 interface StatProps {
@@ -61,8 +61,8 @@ export function DownloaderPage() {
 
   const updateLastDownloaded = async (sessionName: string) => {
     if (!window.electronAPI) return;
-    const videos = await window.electronAPI.listDownloadedVideos();
-    const latest = videos.find((video) => video.sessionName === sessionName);
+    const videos = (await window.electronAPI.listDownloadedVideos()) as DownloadedVideo[];
+    const latest = videos.find((video: DownloadedVideo) => video.sessionName === sessionName);
     if (latest) {
       setLastFile(latest.fileName);
     }
@@ -70,13 +70,14 @@ export function DownloaderPage() {
 
   const handleAction = async (
     action: 'open' | 'scan' | 'download',
-    runner: () => Promise<RunResult>
+    runner: (api: NonNullable<Window['electronAPI']>) => Promise<RunResult>
   ) => {
-    if (!selectedSession || !window.electronAPI) return;
+    const api = window.electronAPI;
+    if (!selectedSession || !api) return;
     setBusyAction(action);
     setStatus('Working…');
     try {
-      const result = await runner();
+      const result = await runner(api);
       if (result.ok) {
         if (typeof result.draftsFound === 'number') {
           setDraftsFound(result.draftsFound);
@@ -147,21 +148,21 @@ export function DownloaderPage() {
               label="Open Drafts"
               loading={busyAction === 'open'}
               onClick={() =>
-                handleAction('open', () => window.electronAPI.downloader.openDrafts(selectedSession))
+                handleAction('open', (api) => api.downloader.openDrafts(selectedSession))
               }
             />
             <ActionButton
               label="Scan for Videos"
               loading={busyAction === 'scan'}
               onClick={() =>
-                handleAction('scan', () => window.electronAPI.downloader.scanDrafts(selectedSession))
+                handleAction('scan', (api) => api.downloader.scanDrafts(selectedSession))
               }
             />
             <ActionButton
               label="Download All"
               loading={busyAction === 'download'}
               onClick={() =>
-                handleAction('download', () => window.electronAPI.downloader.downloadAll(selectedSession))
+                handleAction('download', (api) => api.downloader.downloadAll(selectedSession))
               }
             />
           </div>

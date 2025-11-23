@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { useAppStore } from '../store';
-import type { PipelineProgress, PipelineStep, PipelineStepType } from '../shared/types';
+import type { PipelineProgress, PipelineStep, PipelineStepType } from '../../shared/types';
 
 type UiStep = PipelineStep & { id: string };
 
@@ -42,8 +42,8 @@ export const AutomatorPage: React.FC = () => {
       setWarning('Pipeline IPC is unavailable in this build.');
       return;
     }
-    const unsubscribe = window.electronAPI.pipeline.onProgress((progress) => {
-      setLogs((prev) => [progress as PipelineProgress, ...prev].slice(0, 3));
+    const unsubscribe = window.electronAPI.pipeline.onProgress((progress: PipelineProgress) => {
+      setLogs((prev) => [progress, ...prev].slice(0, 3));
       if (progress.stepType === 'pipeline') {
         if (progress.status === 'running') setStatus('running');
         if (progress.status === 'success') setStatus('success');
