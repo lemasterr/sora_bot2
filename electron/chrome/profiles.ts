@@ -165,6 +165,10 @@ export async function resolveProfileLaunchTarget(
   // Final cloned user-data dir for automation
   const userDataDir = path.join(cloneRoot, slug);
 
+  // Ensure the cloned profile directory exists before launching Chrome so we
+  // never fail with "profile directory not found" on first use.
+  await ensureDir(userDataDir);
+
   // We intentionally DO NOT pass --profile-directory here.
   // Chrome will treat this userDataDir as an independent profile root.
   // All cookies/extensions/logins for Sora will live under this clone dir.
