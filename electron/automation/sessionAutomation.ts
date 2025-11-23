@@ -67,6 +67,27 @@ const closeBrowserSafe = async (browser: Browser | null) => {
 };
 
 const resolveProfileForContext = async (ctx: SessionRunContext): Promise<ChromeProfile> => {
+  const profilePath = ctx.profileDir;
+
+  if (profilePath) {
+    const profileDirectory = path.basename(profilePath) || 'Default';
+    const userDataDir = path.dirname(profilePath);
+
+    try {
+      const stats = await fs.stat(profilePath);
+      if (stats.isDirectory()) {
+        return {
+          name: profileDirectory,
+          userDataDir,
+          profileDirectory,
+          profileDir: profileDirectory,
+        };
+      }
+    } catch {
+      // fall through to config-based resolution
+    }
+  }
+
   const profile = await resolveChromeProfileForSession({ chromeProfileName: ctx.config.chromeActiveProfileName });
   if (profile) return profile;
   throw new Error('No Chrome profile available');

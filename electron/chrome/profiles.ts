@@ -15,6 +15,8 @@ export type ChromeProfile = {
 
 export type SessionProfilePreference = {
   chromeProfileName?: string | null;
+  userDataDir?: string | null;
+  profileDirectory?: string | null;
 };
 
 let cachedProfiles: ChromeProfile[] | null = null;
@@ -221,14 +223,26 @@ export async function resolveChromeProfileForSession(
   const [profiles, config] = await Promise.all([scanChromeProfiles(), getConfig()]);
 
   const desiredName = preference?.chromeProfileName ?? config.chromeActiveProfileName ?? null;
-  if (desiredName) {
-    const preferred = profiles.find(
-      (p) => p.name === desiredName && (config.chromeUserDataDir ? p.userDataDir === config.chromeUserDataDir : true)
-    );
-    if (preferred) return preferred;
+  const desiredUserDataDir = preference?.userDataDir ?? null;
+  const desiredProfileDir = preference?.profileDirectory ?? null;
 
-    const match = profiles.find((p) => p.name === desiredName);
-    if (match) return match;
+  const matchesPreference = (candidate: ChromeProfile, requireName: boolean): boolean => {
+    const matchesName = desiredName ? candidate.name === desiredName : !requireName;
+    const matchesUserData = desiredUserDataDir ? candidate.userDataDir === desiredUserDataDir : true;
+    const candidateDir = candidate.profileDirectory ?? candidate.profileDir;
+    const matchesProfileDir = desiredProfileDir ? candidateDir === desiredProfileDir : true;
+
+    const respectsConfiguredRoot = config.chromeUserDataDir ? candidate.userDataDir === config.chromeUserDataDir : true;
+
+    return matchesName && matchesUserData && matchesProfileDir && respectsConfiguredRoot;
+  };
+
+  const strictMatch = profiles.find((profile) => matchesPreference(profile, false));
+  if (strictMatch) return strictMatch;
+
+  if (desiredName) {
+    const nameOnlyMatch = profiles.find((profile) => matchesPreference(profile, true));
+    if (nameOnlyMatch) return nameOnlyMatch;
   }
 
   const active = await getActiveChromeProfile();
