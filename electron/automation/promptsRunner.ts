@@ -202,7 +202,8 @@ export async function runPrompts(session: Session): Promise<PromptsRunResult> {
     cancellationMap.delete(session.id);
     unregisterSessionPage(session.id, page);
     if (browser) {
-      const wasExisting = (browser as any).__soraAlreadyRunning === true;
+      const meta = browser as any;
+      const wasExisting = meta.__soraAlreadyRunning === true || meta.__soraManaged === true;
       if (!wasExisting) {
         try {
           await browser.close();

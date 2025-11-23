@@ -22,6 +22,7 @@ import { runCleanupNow, scheduleDailyCleanup } from './maintenance/cleanup';
 import { readProfileFiles, saveProfileFiles } from './content/profileFiles';
 import { sessionLogBroker } from './sessionLogs';
 import { launchBrowserForSession } from './chrome/cdp';
+import { shutdownAllChrome } from './chrome/manager';
 import { resolveSessionCdpPort } from './utils/ports';
 import type { Session } from './sessions/types';
 import type { SessionCommandAction } from '../shared/types';
@@ -127,6 +128,7 @@ app.on('before-quit', () => {
     }
   }
   manualBrowsers.clear();
+  shutdownAllChrome();
 });
 
 app.on('activate', () => {
