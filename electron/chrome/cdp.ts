@@ -36,7 +36,9 @@ async function waitForEndpoint(endpoint: string, timeoutMs = 15000): Promise<voi
   throw new Error(`Chrome CDP endpoint did not open at ${endpoint}`);
 }
 
-async function ensureChromeWithCDP(profile: ChromeProfile, port: number): Promise<string> {
+type LaunchInfo = { endpoint: string; alreadyRunning: boolean };
+
+async function ensureChromeWithCDP(profile: ChromeProfile, port: number): Promise<LaunchInfo> {
   const config = await getConfig();
   const executablePath = await resolveChromeExecutablePath().catch((error) => {
     if (config.chromeExecutablePath) return config.chromeExecutablePath;
@@ -45,7 +47,7 @@ async function ensureChromeWithCDP(profile: ChromeProfile, port: number): Promis
 
   const endpoint = `http://${CDP_HOST}:${port}`;
   if (await isEndpointAvailable(endpoint)) {
-    return endpoint;
+    return { endpoint, alreadyRunning: true };
   }
 
   const profileDirectory = profile.profileDirectory ?? profile.profileDir ?? 'Default';
@@ -75,18 +77,22 @@ async function ensureChromeWithCDP(profile: ChromeProfile, port: number): Promis
     cdpPort: port,
   });
 
-  return endpoint;
+  return { endpoint, alreadyRunning: false };
 }
 
 export async function launchBrowserForSession(
   profile: ChromeProfile,
   cdpPort: number
 ): Promise<Browser> {
-  const endpoint = await ensureChromeWithCDP(profile, cdpPort);
-  const browser = await puppeteer.connect({
+  const { endpoint, alreadyRunning } = await ensureChromeWithCDP(profile, cdpPort);
+  const browser = (await puppeteer.connect({
     browserURL: endpoint,
     defaultViewport: null,
-  });
+  })) as Browser & { __soraAlreadyRunning?: boolean };
+
+  // Mark whether this connection attached to an existing Chrome instance so
+  // callers avoid closing user-launched browsers after work completes.
+  browser.__soraAlreadyRunning = alreadyRunning;
 
   console.info('[chrome] connected to CDP', {
     endpoint,

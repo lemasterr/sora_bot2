@@ -263,10 +263,13 @@ export async function runDownloads(session: Session, maxVideos = 0): Promise<Dow
     cancellationMap.delete(session.id);
     unregisterSessionPage(session.id, page);
     if (browser) {
-      try {
-        await browser.close();
-      } catch {
-        // ignore
+      const wasExisting = (browser as any).__soraAlreadyRunning === true;
+      if (!wasExisting) {
+        try {
+          await browser.close();
+        } catch {
+          // ignore
+        }
       }
     }
   }

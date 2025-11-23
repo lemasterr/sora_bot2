@@ -202,10 +202,13 @@ export async function runPrompts(session: Session): Promise<PromptsRunResult> {
     cancellationMap.delete(session.id);
     unregisterSessionPage(session.id, page);
     if (browser) {
-      try {
-        await browser.close();
-      } catch (closeError) {
-        // ignore close errors
+      const wasExisting = (browser as any).__soraAlreadyRunning === true;
+      if (!wasExisting) {
+        try {
+          await browser.close();
+        } catch (closeError) {
+          // ignore close errors
+        }
       }
     }
   }
