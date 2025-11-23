@@ -140,32 +140,34 @@ export interface WatermarkCleanResult {
   error?: string;
 }
 
-export type PipelineStepType =
-  | 'session_prompts'
-  | 'session_images'
-  | 'session_mix'
-  | 'session_download'
-  | 'session_watermark'
-  | 'session_chrome'
-  | 'global_blur'
-  | 'global_merge'
-  | 'global_watermark'
-  | 'global_probe'
-  | 'pipeline';
+export type WorkflowStepId =
+  | 'openSessions'
+  | 'downloadSession1'
+  | 'downloadSession2'
+  | 'blurVideos'
+  | 'mergeVideos'
+  | 'cleanMetadata';
 
-export interface PipelineStep {
-  id?: string; // optional client-side identifier
-  type: PipelineStepType;
-  sessionIds?: string[];
-  limit?: number;
-  group?: string;
+export interface WorkflowClientStep {
+  id: WorkflowStepId;
+  label: string;
+  enabled: boolean;
+  dependsOn?: WorkflowStepId[];
 }
 
-export interface PipelineProgress {
-  stepIndex: number; // -1 reserved for pipeline-level events
-  stepType: PipelineStepType;
-  status: 'running' | 'success' | 'error';
+export interface WorkflowProgress {
+  stepId: WorkflowStepId | 'workflow';
+  label: string;
+  status: 'running' | 'success' | 'error' | 'skipped';
   message: string;
-  session?: string;
   timestamp: number;
 }
+
+export const DEFAULT_WORKFLOW_STEPS: WorkflowClientStep[] = [
+  { id: 'openSessions', label: 'Open all sessions', enabled: true },
+  { id: 'downloadSession1', label: 'Download (Session 1)', enabled: true, dependsOn: ['openSessions'] },
+  { id: 'downloadSession2', label: 'Download (Session 2)', enabled: true, dependsOn: ['openSessions'] },
+  { id: 'blurVideos', label: 'Blur videos', enabled: true, dependsOn: ['downloadSession1', 'downloadSession2'] },
+  { id: 'mergeVideos', label: 'Merge videos', enabled: true, dependsOn: ['blurVideos'] },
+  { id: 'cleanMetadata', label: 'Clean metadata', enabled: true, dependsOn: ['mergeVideos'] },
+];

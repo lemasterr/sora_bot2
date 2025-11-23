@@ -1,5 +1,6 @@
 import { ReactNode, useMemo, useState } from 'react';
 import { useAppStore } from '../store';
+import { DEFAULT_WORKFLOW_STEPS } from '../shared/types';
 
 type ShortcutResult = { ok?: boolean; error?: string } | unknown;
 
@@ -58,7 +59,10 @@ export function QuickAccessPanel() {
             label="Run Default Pipeline"
             loading={busy === 'Run Default Pipeline'}
             onClick={() =>
-              run('Run Default Pipeline', () => api?.pipeline?.run?.([]) ?? Promise.resolve({ ok: false, error: 'No pipeline' }))
+              run(
+                'Run Default Pipeline',
+                () => api?.pipeline?.run?.(DEFAULT_WORKFLOW_STEPS) ?? Promise.resolve({ ok: false, error: 'No pipeline' })
+              )
             }
           />
           <ShortcutButton

@@ -1,305 +1,149 @@
 import React, { useEffect, useMemo, useState } from 'react';
+import {
+  DEFAULT_WORKFLOW_STEPS,
+  type WorkflowClientStep,
+  type WorkflowProgress,
+} from '../shared/types';
 import { useAppStore } from '../store';
-import type { PipelineProgress, PipelineStep, PipelineStepType } from '../shared/types';
 
-type UiStep = PipelineStep & { id: string };
-
-const STEP_TYPES: { value: PipelineStepType; label: string; hint?: string }[] = [
-  { value: 'session_prompts', label: 'Генерация видео (промпты)', hint: 'Вводит текстовые и визуальные промпты в сессию.' },
-  { value: 'session_images', label: 'Генерация изображений', hint: 'Заглушка для генерации изображений.' },
-  { value: 'session_mix', label: 'Смешивание контента', hint: 'Комбинированные шаги (пока заглушка).' },
-  { value: 'session_download', label: 'Скачивание видео', hint: 'Запускает загрузку роликов из драфтов.' },
-  { value: 'session_watermark', label: 'Копирование в чистую папку', hint: 'Перекладывает скачанные файлы в cleanDir.' },
-  { value: 'session_chrome', label: 'Chrome запуск', hint: 'Технический шаг для Chrome (заглушка).' },
-  { value: 'global_blur', label: 'Блюр водяных знаков', hint: 'Применяет выбранный профиль блюра к роликам.' },
-  { value: 'global_merge', label: 'Склейка видео', hint: 'Склеивает ролики из каталога clean/blurred.' },
-  { value: 'global_watermark', label: 'Обработка водяных знаков', hint: 'Глобальная обработка (заглушка).' },
-  { value: 'global_probe', label: 'Проверочный шаг (debug)', hint: 'Диагностический шаг без изменений.' }
-];
-
-const createStep = (): UiStep => ({
-  id: crypto.randomUUID(),
-  type: 'session_prompts',
-  sessionIds: [],
-  limit: 0,
-  group: ''
-});
+const STATUS_COLORS: Record<string, string> = {
+  idle: 'bg-zinc-700',
+  running: 'bg-blue-500',
+  success: 'bg-emerald-500',
+  error: 'bg-red-500',
+  skipped: 'bg-amber-500',
+};
 
 export const AutomatorPage: React.FC = () => {
   const { sessions } = useAppStore();
-  const [steps, setSteps] = useState<UiStep[]>([createStep()]);
-  const [logs, setLogs] = useState<PipelineProgress[]>([]);
+  const [steps, setSteps] = useState<WorkflowClientStep[]>(DEFAULT_WORKFLOW_STEPS);
+  const [logs, setLogs] = useState<WorkflowProgress[]>([]);
   const [status, setStatus] = useState<'idle' | 'running' | 'success' | 'error'>('idle');
   const [warning, setWarning] = useState<string>('');
+  const [stepStatuses, setStepStatuses] = useState<Record<string, WorkflowProgress>>({});
 
-  const sessionOptions = useMemo(
-    () =>
-      sessions.map((s) => ({
-        id: s.id,
-        name: s.name,
-        profileLabel: s.chromeProfileName ? `Chrome: ${s.chromeProfileName}` : 'Chrome: not set',
-      })),
-    [sessions]
-  );
-  const sessionNameById = useMemo(() => Object.fromEntries(sessionOptions.map((s) => [s.id, s.name])), [sessionOptions]);
-  const statusColor =
-    status === 'running' ? 'bg-blue-500' : status === 'success' ? 'bg-emerald-500' : status === 'error' ? 'bg-red-500' : 'bg-zinc-700';
+  const workflowStatusColor = STATUS_COLORS[status] ?? STATUS_COLORS.idle;
 
   useEffect(() => {
     if (!window.electronAPI?.pipeline?.onProgress) {
-      setWarning('Pipeline IPC is unavailable in this build.');
+      setWarning('Workflow IPC is unavailable in this build.');
       return;
     }
     const unsubscribe = window.electronAPI.pipeline.onProgress((progress) => {
-      setLogs((prev) => [progress as PipelineProgress, ...prev].slice(0, 3));
-      if (progress.stepType === 'pipeline') {
-        if (progress.status === 'running') setStatus('running');
-        if (progress.status === 'success') setStatus('success');
-        if (progress.status === 'error') setStatus('error');
+      const event = progress as WorkflowProgress;
+      setLogs((prev) => [event, ...prev].slice(0, 6));
+
+      if (event.stepId === 'workflow') {
+        if (event.status === 'running') setStatus('running');
+        if (event.status === 'success') setStatus('success');
+        if (event.status === 'error') setStatus('error');
+      } else {
+        setStepStatuses((prev) => ({ ...prev, [event.stepId]: event }));
       }
     });
 
     return () => unsubscribe?.();
   }, []);
 
-  const updateStep = (id: string, partial: Partial<UiStep>) => {
-    setSteps((prev) => prev.map((step) => (step.id === id ? { ...step, ...partial } : step)));
+  const toggleStep = (id: WorkflowClientStep['id']) => {
+    setSteps((prev) => prev.map((step) => (step.id === id ? { ...step, enabled: !step.enabled } : step)));
   };
 
-  const moveStep = (id: string, direction: 'up' | 'down') => {
-    setSteps((prev) => {
-      const idx = prev.findIndex((s) => s.id === id);
-      if (idx === -1) return prev;
-      const target = direction === 'up' ? idx - 1 : idx + 1;
-      if (target < 0 || target >= prev.length) return prev;
-      const next = [...prev];
-      const [removed] = next.splice(idx, 1);
-      next.splice(target, 0, removed);
-      return next;
-    });
-  };
+  const resetSteps = () => setSteps(DEFAULT_WORKFLOW_STEPS);
 
-  const addStep = () => setSteps((prev) => [...prev, createStep()]);
-
-  const applyClassicPreset = () => {
-    const sessionSelection = steps.flatMap((s) => s.sessionIds ?? []);
-    const uniqueSessionIds = sessionSelection.length
-      ? Array.from(new Set(sessionSelection))
-      : sessions.map((s) => s.id);
-    const downloadLimit = steps.find((s) => s.type === 'session_download')?.limit ?? 0;
-
-    const preset: UiStep[] = [
-      { id: crypto.randomUUID(), type: 'session_prompts', sessionIds: uniqueSessionIds, limit: 0, group: '' },
-      {
-        id: crypto.randomUUID(),
-        type: 'session_download',
-        sessionIds: uniqueSessionIds,
-        limit: downloadLimit,
-        group: '',
-      },
-      { id: crypto.randomUUID(), type: 'session_watermark', sessionIds: uniqueSessionIds, limit: 0, group: '' },
-      { id: crypto.randomUUID(), type: 'global_blur', sessionIds: uniqueSessionIds, limit: 0, group: '' },
-      { id: crypto.randomUUID(), type: 'global_merge', sessionIds: uniqueSessionIds, limit: 0, group: '' },
-    ];
-
-    setSteps(preset);
-  };
-
-  const removeStep = (id: string) => setSteps((prev) => prev.filter((step) => step.id !== id));
-
-  const toggleSession = (id: string, sessionId: string) => {
-    setSteps((prev) =>
-      prev.map((step) => {
-        if (step.id !== id) return step;
-        const next = new Set(step.sessionIds ?? []);
-        if (next.has(sessionId)) {
-          next.delete(sessionId);
-        } else {
-          next.add(sessionId);
-        }
-        return { ...step, sessionIds: Array.from(next) };
-      })
-    );
-  };
-
-  const startPipeline = async () => {
+  const startWorkflow = async () => {
     if (!window.electronAPI?.pipeline?.run) {
-      setWarning('Pipeline run API not available.');
+      setWarning('Workflow run API not available.');
       return;
     }
     setStatus('running');
-    const payload: PipelineStep[] = steps.map(({ id, ...rest }) => ({ ...rest }));
-    const result = await window.electronAPI.pipeline.run(payload);
-    if (!result.ok) {
-      setStatus('error');
-    }
+    setStepStatuses({});
+    setLogs([]);
+    const payload = steps.map((step) => ({ ...step }));
+    await window.electronAPI.pipeline.run(payload);
   };
 
-  const stopPipeline = async () => {
+  const stopWorkflow = async () => {
     if (!window.electronAPI?.pipeline?.cancel) return;
     await window.electronAPI.pipeline.cancel();
     setStatus('idle');
   };
+
+  const sessionNamesById = useMemo(
+    () => Object.fromEntries(sessions.map((s) => [s.id, s.name])),
+    [sessions]
+  );
 
   return (
     <div className="grid gap-4 lg:grid-cols-[2fr_1fr]">
       <div className="space-y-3">
         <div className="flex items-center justify-between">
           <div>
-            <h3 className="text-lg font-semibold text-white">Automator Pipeline Editor</h3>
-            <p className="text-sm text-zinc-400">Define ordered automation steps across sessions.</p>
+            <h3 className="text-lg font-semibold text-white">Workflow Runner</h3>
+            <p className="text-sm text-zinc-400">Toggle and execute the standard automation steps.</p>
           </div>
           <div className="flex items-center gap-2 text-xs text-zinc-300">
-            <span className={`h-2 w-2 rounded-full ${statusColor}`} data-status={status} />
+            <span className={`h-2 w-2 rounded-full ${workflowStatusColor}`} data-status={status} />
             <span className="capitalize">{status}</span>
           </div>
         </div>
 
-        <div className="flex gap-2">
+        <div className="flex flex-wrap gap-2">
           <button
-            onClick={addStep}
-            className="rounded-lg bg-blue-600 px-3 py-2 text-sm font-semibold text-white transition hover:bg-blue-500"
-          >
-            Add Step
-          </button>
-          <button
-            onClick={applyClassicPreset}
-            className="rounded-lg bg-indigo-600 px-3 py-2 text-sm font-semibold text-white transition hover:bg-indigo-500"
-          >
-            Classic Sora pipeline
-          </button>
-          <button
-            onClick={startPipeline}
+            onClick={startWorkflow}
             className="rounded-lg bg-emerald-600 px-3 py-2 text-sm font-semibold text-white transition hover:bg-emerald-500"
           >
-            Start Pipeline
+            Start Workflow
           </button>
           <button
-            onClick={stopPipeline}
+            onClick={stopWorkflow}
             className="rounded-lg border border-red-600 px-3 py-2 text-sm font-semibold text-red-200 transition hover:bg-red-600/20"
           >
             Stop
           </button>
+          <button
+            onClick={resetSteps}
+            className="rounded-lg border border-zinc-700 px-3 py-2 text-sm font-semibold text-zinc-200 transition hover:border-blue-500"
+          >
+            Reset to defaults
+          </button>
         </div>
 
         <div className="space-y-3">
-          {steps.map((step, index) => (
-            <div key={step.id} className="rounded-xl border border-zinc-700 bg-zinc-900 p-4">
-              <div className="flex items-center justify-between gap-3">
-                <div className="flex items-center gap-3">
-                  <div className="rounded bg-zinc-800 px-2 py-1 text-xs text-zinc-300">Step {index + 1}</div>
-                  <select
-                    value={step.type}
-                    onChange={(e) => updateStep(step.id, { type: e.target.value as PipelineStepType })}
-                    className="rounded-md border border-zinc-700 bg-zinc-800 px-3 py-2 text-sm text-zinc-100 focus:border-blue-500 focus:outline-none"
-                  >
-                    {STEP_TYPES.map((option) => (
-                      <option key={option.value} value={option.value} title={option.hint}>
-                        {option.label}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-                <button
-                  onClick={() => removeStep(step.id)}
-                  className="text-xs text-red-400 transition hover:text-red-300"
-                >
-                  Remove Step
-                </button>
-                <div className="flex items-center gap-1">
-                  <button
-                    onClick={() => moveStep(step.id, 'up')}
-                    className="rounded border border-zinc-700 px-2 py-1 text-xs text-zinc-200 transition hover:border-blue-500"
-                    title="Move step up"
-                  >
-                    ↑
-                  </button>
-                  <button
-                    onClick={() => moveStep(step.id, 'down')}
-                    className="rounded border border-zinc-700 px-2 py-1 text-xs text-zinc-200 transition hover:border-blue-500"
-                    title="Move step down"
-                  >
-                    ↓
-                  </button>
-                </div>
-              </div>
-
-              <div className="mt-4 grid gap-4 md:grid-cols-2">
-                <div className="space-y-2">
-                  <div className="flex items-center justify-between text-xs uppercase tracking-wide text-zinc-400">
-                    <span>Sessions</span>
-                    <span className="text-[11px] text-zinc-500">
-                      {(step.sessionIds?.length ?? 0) > 0
-                        ? `${step.sessionIds?.length ?? 0} selected`
-                        : 'None selected'}
-                    </span>
-                  </div>
-
-                  <div className="space-y-2 rounded-lg border border-zinc-700 bg-zinc-800/60 p-2">
-                    {sessionOptions.length === 0 && (
-                      <div className="text-sm text-zinc-400">No sessions available.</div>
-                    )}
-
-                    {sessionOptions.map((session) => {
-                      const checked = step.sessionIds?.includes(session.id);
-                      return (
-                        <label
-                          key={session.id}
-                          className={`flex items-center justify-between gap-3 rounded-md border px-3 py-2 text-left transition ${
-                            checked
-                              ? 'border-emerald-500/60 bg-emerald-500/5 text-white'
-                              : 'border-zinc-700 bg-zinc-900/30 text-zinc-200 hover:border-blue-500'
-                          }`}
-                        >
-                          <div className="space-y-0.5">
-                            <div className="text-sm font-semibold">{session.name}</div>
-                            <div className="text-xs text-zinc-400">{session.profileLabel}</div>
-                          </div>
-                          <input
-                            type="checkbox"
-                            checked={checked}
-                            onChange={() => toggleSession(step.id, session.id)}
-                            className="h-4 w-4 accent-emerald-500"
-                          />
-                        </label>
-                      );
-                    })}
-                  </div>
-                  <p className="text-xs text-zinc-500">Toggle the sessions that should run for this step.</p>
-                </div>
-
-                <div className="grid gap-3 md:grid-cols-2">
-                  {step.type === 'session_download' && (
-                    <div className="space-y-2">
-                      <label className="text-xs uppercase tracking-wide text-zinc-400">Max Downloads</label>
-                      <input
-                        type="number"
-                        min={0}
-                        value={step.limit ?? 0}
-                        onChange={(e) => updateStep(step.id, { limit: Number(e.target.value) })}
-                        className="w-full rounded-md border border-zinc-700 bg-zinc-800 px-3 py-2 text-sm text-zinc-100 focus:border-blue-500 focus:outline-none"
-                      />
-                      <p className="text-[11px] text-zinc-500">0 = без ограничения. Перекрывает лимит сессии.</p>
+          {steps.map((step, index) => {
+            const event = stepStatuses[step.id];
+            const stepStatus = event?.status ?? 'idle';
+            const color = STATUS_COLORS[stepStatus] ?? STATUS_COLORS.idle;
+            return (
+              <div key={step.id} className="rounded-xl border border-zinc-700 bg-zinc-900 p-4">
+                <div className="flex items-center justify-between gap-3">
+                  <div className="flex items-center gap-3">
+                    <div className="rounded bg-zinc-800 px-2 py-1 text-xs text-zinc-300">Step {index + 1}</div>
+                    <div className="space-y-1">
+                      <div className="text-sm font-semibold text-white">{step.label}</div>
+                      {step.dependsOn && step.dependsOn.length > 0 && (
+                        <div className="text-[11px] text-zinc-400">Depends on: {step.dependsOn.join(', ')}</div>
+                      )}
                     </div>
-                  )}
-                  {(step.type === 'global_merge' || step.type === 'global_blur') && (
-                    <div className="space-y-2">
-                      <label className="text-xs uppercase tracking-wide text-zinc-400">
-                        {step.type === 'global_blur' ? 'Blur profile / group' : 'Group'}
-                      </label>
-                      <input
-                        type="text"
-                        value={step.group ?? ''}
-                        onChange={(e) => updateStep(step.id, { group: e.target.value })}
-                        className="w-full rounded-md border border-zinc-700 bg-zinc-800 px-3 py-2 text-sm text-zinc-100 focus:border-blue-500 focus:outline-none"
-                        placeholder={step.type === 'global_blur' ? 'blur profile id' : 'merge group'}
-                      />
-                    </div>
-                  )}
+                  </div>
+                  <label className="flex items-center gap-2 text-xs text-zinc-200">
+                    <input
+                      type="checkbox"
+                      checked={step.enabled}
+                      onChange={() => toggleStep(step.id)}
+                      className="h-4 w-4 accent-emerald-500"
+                    />
+                    Enable
+                  </label>
+                  <div className="flex items-center gap-2 text-xs text-zinc-200">
+                    <span className={`h-2 w-2 rounded-full ${color}`} />
+                    <span className="capitalize">{stepStatus}</span>
+                  </div>
                 </div>
+                {event?.message && <div className="mt-2 text-xs text-zinc-300">{event.message}</div>}
               </div>
-            </div>
-          ))}
+            );
+          })}
         </div>
       </div>
 
@@ -307,7 +151,7 @@ export const AutomatorPage: React.FC = () => {
         <div className="flex items-center justify-between">
           <div>
             <h4 className="text-sm font-semibold text-white">Active Logs</h4>
-            <p className="text-xs text-zinc-500">Latest pipeline events</p>
+            <p className="text-xs text-zinc-500">Latest workflow events</p>
           </div>
         </div>
         {warning && (
@@ -316,19 +160,21 @@ export const AutomatorPage: React.FC = () => {
         <div className="space-y-2 text-sm font-mono text-zinc-200">
           {logs.length === 0 && <div className="text-zinc-500">No events yet.</div>}
           {logs.map((log, idx) => (
-            <div key={`${log.stepIndex}-${idx}`} className="rounded border border-zinc-800 bg-zinc-950/70 px-3 py-2">
+            <div key={`${log.stepId}-${idx}`} className="rounded border border-zinc-800 bg-zinc-950/70 px-3 py-2">
               <div className="flex items-center justify-between text-xs text-zinc-400">
-                <span>{log.stepIndex >= 0 ? `Step ${log.stepIndex + 1}` : 'Pipeline'}</span>
+                <span className="capitalize">{log.stepId}</span>
                 <span className="capitalize">{log.status}</span>
               </div>
-              <div className="text-blue-400">{log.stepType}</div>
               <div className="text-zinc-100">{log.message}</div>
-              {log.session && (
-                <div className="text-emerald-400">{sessionNameById[log.session] ?? log.session}</div>
-              )}
+              {log.label && <div className="text-emerald-400">{log.label}</div>}
             </div>
           ))}
         </div>
+        {Object.keys(sessionNamesById).length === 0 && (
+          <div className="rounded-md border border-zinc-700 bg-zinc-800 p-3 text-xs text-zinc-200">
+            Сессии не найдены. Создайте их на странице Sessions, чтобы шаги скачки и постобработки работали.
+          </div>
+        )}
       </div>
     </div>
   );

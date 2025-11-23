@@ -16,6 +16,7 @@ import { extractPreviewFrames, pickSmartPreviewFrames } from './video/ffmpegWate
 import { blurVideoWithProfile, listBlurProfiles, saveBlurProfile, deleteBlurProfile } from './video/ffmpegBlur';
 import { testTelegram, sendTelegramMessage } from './integrations/telegram';
 import { loggerEvents, logError } from './logging/logger';
+import { logInfo } from '../core/utils/log';
 import { getDailyStats, getTopSessions } from './logging/history';
 import { getLastSelectorForSession, startInspectorForSession } from './automation/selectorInspector';
 import { runCleanupNow, scheduleDailyCleanup } from './maintenance/cleanup';
@@ -25,7 +26,7 @@ import { launchBrowserForSession } from './chrome/cdp';
 import { shutdownAllChrome } from './chrome/manager';
 import { resolveSessionCdpPort } from './utils/ports';
 import type { Session } from './sessions/types';
-import type { SessionCommandAction } from '../shared/types';
+import type { SessionCommandAction, WorkflowClientStep } from '../shared/types';
 import type { Browser } from 'puppeteer-core';
 
 let mainWindow: BrowserWindow | null = null;
@@ -90,27 +91,27 @@ async function getOrLaunchManualBrowser(session: Session): Promise<Browser> {
   return browser;
 }
 
-console.log('[main] starting, NODE_ENV=', process.env.NODE_ENV);
+logInfo(`[main] starting, NODE_ENV=${process.env.NODE_ENV}`);
 
 app.whenReady()
   .then(() => {
-    console.log('[main] app is ready, creating window');
+    logInfo('[main] app is ready, creating window');
     createMainWindow();
   })
   .then(() => {
     scheduleDailyCleanup();
-    console.log('[main] daily cleanup scheduled');
+    logInfo('[main] daily cleanup scheduled');
   });
 
 app.on('window-all-closed', () => {
-  console.log('[main] window-all-closed');
+  logInfo('[main] window-all-closed');
   if (process.platform !== 'darwin') {
     app.quit();
   }
 });
 
 app.on('before-quit', async () => {
-  console.log('[main] before-quit');
+  logInfo('[main] before-quit');
   for (const browser of manualBrowsers.values()) {
     try {
       browser.close();
@@ -308,14 +309,15 @@ handle('downloader:downloadAll', async (sessionKey: string, options?: { limit?: 
 });
 
 handle('pipeline:run', async (steps) => {
-  const safeSteps = Array.isArray(steps)
+  const safeSteps: WorkflowClientStep[] = Array.isArray(steps)
     ? steps.map((step) => ({
-        type: step?.type,
-        sessionIds: Array.isArray(step?.sessionIds) ? step.sessionIds : [],
-        limit: typeof step?.limit === 'number' ? step.limit : undefined,
-        group: typeof step?.group === 'string' ? step.group : undefined,
+        id: step?.id,
+        label: step?.label,
+        enabled: step?.enabled !== false,
+        dependsOn: Array.isArray(step?.dependsOn) ? step.dependsOn : undefined,
       }))
     : [];
+
   await runPipeline(safeSteps, (status) => mainWindow?.webContents.send('pipeline:progress', status));
   return { ok: true };
 });
