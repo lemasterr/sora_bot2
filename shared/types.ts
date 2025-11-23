@@ -11,23 +11,26 @@ export interface ChromeProfile {
 export interface ManagedSession {
   id: string;
   name: string;
-  chromeProfile?: string;
-  promptProfile?: string;
-  cdpPort?: number;
-  promptsFile?: string;
-  imagePromptsFile?: string;
-  titlesFile?: string;
-  submittedLog?: string;
-  failedLog?: string;
-  downloadDir?: string;
-  cleanDir?: string;
-  cursorFile?: string;
-  maxVideos?: number;
-  openDrafts?: boolean;
-  autoLaunchChrome?: boolean;
-  autoLaunchAutogen?: boolean;
-  notes?: string;
+  chromeProfileName: string | null;
+  promptProfile: string | null;
+  cdpPort: number | null;
+  promptsFile: string;
+  imagePromptsFile: string;
+  titlesFile: string;
+  submittedLog: string;
+  failedLog: string;
+  downloadDir: string;
+  cleanDir: string;
+  cursorFile: string;
+  maxVideos: number;
+  openDrafts: boolean;
+  autoLaunchChrome: boolean;
+  autoLaunchAutogen: boolean;
+  notes: string;
   status?: 'idle' | 'running' | 'warning' | 'error';
+  promptCount?: number;
+  titleCount?: number;
+  hasFiles?: boolean;
 }
 
 // The Config type mirrors the canonical backend shape from electron/config/config.ts.
@@ -62,14 +65,6 @@ export interface AppLogEntry {
   level: 'info' | 'error';
   message: string;
   sessionId?: string;
-}
-
-export interface SessionInfo {
-  name: string;
-  path: string;
-  hasFiles: boolean;
-  promptCount: number;
-  titleCount: number;
 }
 
 export interface SessionFiles {

@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import type { Config, SessionInfo } from '../shared/types';
+import type { Config, ManagedSession } from '../shared/types';
 
 export type AppPage =
   | 'dashboard'
@@ -14,12 +14,12 @@ export type AppPage =
 
 interface AppState {
   currentPage: AppPage;
-  sessions: SessionInfo[];
+  sessions: ManagedSession[];
   selectedSessionName: string | null;
   config: Config | null;
   quickAccessOpen: boolean;
   setCurrentPage: (page: AppPage) => void;
-  setSessions: (sessions: SessionInfo[]) => void;
+  setSessions: (sessions: ManagedSession[]) => void;
   setSelectedSessionName: (name: string | null) => void;
   setConfig: (config: Config | null) => void;
   toggleQuickAccess: () => void;
@@ -37,7 +37,7 @@ export const useAppStore = create<AppState>((set) => ({
   config: null,
   quickAccessOpen: false,
   setCurrentPage: (page: AppPage) => set({ currentPage: page }),
-  setSessions: (sessions: SessionInfo[]) => set({ sessions }),
+  setSessions: (sessions: ManagedSession[]) => set({ sessions }),
   setSelectedSessionName: (name: string | null) => set({ selectedSessionName: name }),
   setConfig: (config: Config | null) => set({ config }),
   toggleQuickAccess: () => set((state) => ({ quickAccessOpen: !state.quickAccessOpen })),

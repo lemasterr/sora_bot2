@@ -12,8 +12,8 @@ const statusColors: Record<NonNullable<ManagedSession['status']>, string> = {
 const emptySession: ManagedSession = {
   id: '',
   name: 'New Session',
-  chromeProfile: undefined,
-  promptProfile: undefined,
+  chromeProfileName: null,
+  promptProfile: null,
   cdpPort: 9222,
   promptsFile: '',
   imagePromptsFile: '',
@@ -96,13 +96,18 @@ export const SessionsPage: React.FC = () => {
   const saveSession = async () => {
     if (!window.electronAPI.sessions) return;
     setSaving(true);
-    const updated = await window.electronAPI.sessions.save(form);
-    setSessions(updated);
-    const current = updated.find((s) => s.id === form.id) || updated[updated.length - 1];
-    if (current) {
-      setSelectedId(current.id);
-      setForm(current);
-    }
+    const saved = await window.electronAPI.sessions.save(form);
+    setSessions((prev) => {
+      const existingIndex = prev.findIndex((s) => s.id === saved.id);
+      if (existingIndex >= 0) {
+        const next = [...prev];
+        next[existingIndex] = saved;
+        return next;
+      }
+      return [...prev, saved];
+    });
+    setSelectedId(saved.id);
+    setForm(saved);
     setSaving(false);
     setActionMessage('Session saved');
   };
@@ -183,7 +188,7 @@ export const SessionsPage: React.FC = () => {
                   {statusDot(session.status || 'idle')}
                   <span className="font-semibold">{session.name}</span>
                 </div>
-                <span className="text-xs text-zinc-400">{session.chromeProfile || 'No profile'}</span>
+                <span className="text-xs text-zinc-400">{session.chromeProfileName || 'No profile'}</span>
               </div>
               <div className="mt-1 text-xs text-zinc-400">{session.promptProfile || 'Prompt profile: default'}</div>
             </button>
@@ -249,8 +254,8 @@ export const SessionsPage: React.FC = () => {
               Chrome Profile
               <select
                 className="mt-1 w-full rounded-lg border border-zinc-700 bg-zinc-950 px-3 py-2 text-sm text-white focus:border-blue-500 focus:outline-none"
-                value={form.chromeProfile ?? ''}
-                onChange={(e) => handleChange('chromeProfile', e.target.value || undefined)}
+                value={form.chromeProfileName ?? ''}
+                onChange={(e) => handleChange('chromeProfileName', e.target.value || null)}
               >
                 <option value="">Select profile</option>
                 {profiles.map((profile) => (
