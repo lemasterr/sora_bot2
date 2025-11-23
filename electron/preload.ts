@@ -1,11 +1,12 @@
 import { contextBridge, ipcRenderer } from 'electron';
 import type { SessionCommandAction } from '../shared/types';
+import { logError } from '../core/utils/log';
 
 const safeInvoke = async (channel: string, ...args: unknown[]) => {
   try {
     return await ipcRenderer.invoke(channel, ...args);
   } catch (error) {
-    console.error('IPC invoke failed', channel, error);
+    logError(`IPC invoke failed for ${channel}`, error);
     return { ok: false, error: (error as Error)?.message || 'IPC failed' };
   }
 };

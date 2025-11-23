@@ -1,13 +1,15 @@
 import fs from 'fs/promises';
 import path from 'path';
-import puppeteer, { type Browser, type Page } from 'puppeteer-core';
+import { type Browser, type Page } from 'puppeteer-core';
 
+import { selectors, waitForClickable, waitForVisible } from '../../core/selectors/selectors';
 import { getConfig, type Config } from '../config/config';
 import { getSessionPaths } from '../sessions/repo';
 import type { Session } from '../sessions/types';
 import { formatTemplate, sendTelegramMessage } from '../integrations/telegram';
 import { heartbeat, startWatchdog, stopWatchdog } from './watchdog';
 import { registerSessionPage, unregisterSessionPage } from './selectorInspector';
+import { ensureBrowserForSession } from './sessionChrome';
 
 function delay(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -27,10 +29,6 @@ export type PromptsRunResult = {
   error?: string;
 };
 
-const PROMPT_SELECTOR = "textarea[data-testid='prompt-input']";
-const FILE_INPUT_SELECTOR = "input[type='file']";
-const SUBMIT_SELECTOR = "button[data-testid='submit']";
-const DEFAULT_CDP_PORT = 9222;
 const WATCHDOG_TIMEOUT_MS = 120_000;
 const MAX_WATCHDOG_RESTARTS = 2;
 
@@ -58,15 +56,6 @@ async function readLines(filePath: string): Promise<string[]> {
   }
 }
 
-function resolveCdpEndpoint(config: Config): string {
-  const envEndpoint = process.env.CDP_ENDPOINT?.trim();
-  if (envEndpoint) return envEndpoint;
-
-  const port = Number(config.cdpPort ?? DEFAULT_CDP_PORT);
-  const safePort = Number.isFinite(port) ? port : DEFAULT_CDP_PORT;
-  return `http://127.0.0.1:${safePort}`;
-}
-
 async function preparePage(browser: Browser): Promise<Page> {
   const context = browser.browserContexts()[0] ?? browser.defaultBrowserContext();
   const pages = await context.pages();
@@ -74,10 +63,10 @@ async function preparePage(browser: Browser): Promise<Page> {
   const page = existing ?? (await context.newPage());
 
   try {
-    await page.waitForSelector(PROMPT_SELECTOR, { timeout: 20_000 });
+    await waitForVisible(page, selectors.promptInput, 20_000);
   } catch {
     await page.goto('https://sora.chatgpt.com', { waitUntil: 'networkidle2' });
-    await page.waitForSelector(PROMPT_SELECTOR, { timeout: 60_000 });
+    await waitForVisible(page, selectors.promptInput, 60_000);
   }
 
   return page;
@@ -120,14 +109,8 @@ export async function runPrompts(
   try {
     const [loadedConfig, paths] = await Promise.all([getConfig(), getSessionPaths(session)]);
     config = loadedConfig;
-    const cdpEndpoint = resolveCdpEndpoint(config);
 
-    const connected = (await puppeteer.connect({
-      browserURL: cdpEndpoint,
-      defaultViewport: null,
-    })) as Browser & { __soraManaged?: boolean };
-
-    connected.__soraManaged = false;
+    const { browser: connected } = await ensureBrowserForSession(session, config);
     browser = connected;
     const prepare = async () => {
       if (!browser) return;
@@ -172,18 +155,23 @@ export async function runPrompts(
       const imagePath = imagePrompts[index];
 
       try {
-        await activePage.click(PROMPT_SELECTOR, { clickCount: 3 });
+        await activePage.click(selectors.promptInput, { clickCount: 3, delay: 80 });
         await activePage.keyboard.press('Backspace');
-        await activePage.type(PROMPT_SELECTOR, promptText);
+        await activePage.type(selectors.promptInput, promptText);
 
         if (imagePath) {
-          const input = await activePage.$(FILE_INPUT_SELECTOR);
+          const input = await activePage.$(selectors.fileInput);
           if (input) {
             await input.uploadFile(imagePath);
           }
         }
 
-        await activePage.click(SUBMIT_SELECTOR);
+        const submitButton = await waitForClickable(
+          activePage,
+          selectors.submitButton,
+          config.promptDelayMs + 15_000
+        );
+        await submitButton.click({ delay: 80 });
         await delay(config.promptDelayMs);
         heartbeat(runId);
 

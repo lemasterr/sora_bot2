@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import type { ManagedSession, ChromeProfile, RunResult } from '../shared/types';
+import type { ManagedSession, ChromeProfile, RunResult } from '../../shared/types';
 import { SessionWindow } from './SessionWindow';
 
 const statusColors: Record<NonNullable<ManagedSession['status']>, string> = {

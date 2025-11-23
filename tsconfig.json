@@ -13,10 +13,6 @@
     "types": ["node"],
     "allowSyntheticDefaultImports": true
   },
-  "include": ["electron", "src", "shared", "vite.config.ts"],
-  "references": [
-    {
-      "path": "./tsconfig.electron.json"
-    }
-  ]
+  "include": ["electron", "src", "shared", "core", "vite.config.ts"],
+  "exclude": ["dist-electron"]
 }

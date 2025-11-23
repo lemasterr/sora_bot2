@@ -5,7 +5,7 @@ import {
   type WatermarkMask,
   type WatermarkRect,
   type WatermarkCleanResult
-} from '../shared/types';
+} from '../../shared/types';
 import { useAppStore } from '../store';
 
 interface FrameCardProps {
@@ -140,11 +140,11 @@ export const WatermarkPage: React.FC = () => {
     const payload: WatermarkMask = {
       id: activeMaskId,
       name: maskName || 'Custom Mask',
-      rects
+      rects,
     };
-    const saved = await window.electronAPI.watermark.saveMask(payload);
+    const saved = (await window.electronAPI.watermark.saveMask(payload)) as any[];
     setMasks(saved);
-    const match = saved.find((m) => m.name === payload.name || m.id === payload.id);
+    const match = saved.find((m: any) => m.name === payload.name || m.id === payload.id);
     if (match) {
       setActiveMaskId(match.id);
       setStatus(`Saved mask "${match.name}"`);
@@ -162,7 +162,7 @@ export const WatermarkPage: React.FC = () => {
       if (!result.ok) {
         setStatus(result.error ?? 'Cleaner failed');
       } else {
-        const cleaned = result.items.filter((i) => i.status === 'cleaned').length;
+        const cleaned = result.items.filter((i: any) => i.status === 'cleaned').length;
         setStatus(`Cleaner finished (${cleaned}/${result.items.length} cleaned)`);
       }
     } catch (error) {
@@ -253,7 +253,7 @@ export const WatermarkPage: React.FC = () => {
             </div>
             {detection?.frames && detection.frames.length > 0 ? (
               <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2">
-                {detection.frames.map((frame) => (
+                {detection.frames.map((frame: any) => (
                   <FrameCard key={frame.path} frame={frame} onAddRect={addRect} highlightRects={rects} />
                 ))}
               </div>
@@ -391,7 +391,7 @@ export const WatermarkPage: React.FC = () => {
               </button>
               {cleanResult && (
                 <div className="rounded-lg border border-zinc-800 bg-zinc-900/80 p-3 text-xs text-zinc-300">
-                  {cleanResult.items.map((item) => (
+                  {cleanResult.items.map((item: any) => (
                     <div key={item.video} className="flex items-start justify-between border-b border-zinc-800/80 py-1 last:border-none">
                       <div>
                         <div className="font-semibold text-zinc-100">{item.video.split('/').pop()}</div>

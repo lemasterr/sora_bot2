@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import type { AppLogEntry, LogSource } from '../shared/types';
+import type { AppLogEntry, LogSource } from '../../shared/types';
 
 const SOURCES: LogSource[] = ['Chrome', 'Autogen', 'Downloader', 'Pipeline'];
 
