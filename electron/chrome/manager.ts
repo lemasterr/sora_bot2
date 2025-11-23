@@ -243,6 +243,12 @@ export async function attachExistingChromeForProfile(
   const key = instanceKey(profile);
   const existing = activeInstances.get(key);
 
+  console.info('[chrome] attachExistingChromeForProfile: checking activeInstances', {
+    key,
+    hasExisting: !!existing,
+    isConnected: !!existing?.browser?.isConnected(),
+  });
+
   // Если уже есть подключённый браузер для этого профиля — просто используем его
   if (existing && existing.browser.isConnected()) {
     return existing.browser;
@@ -255,6 +261,11 @@ export async function attachExistingChromeForProfile(
   let targetEndpoint = endpoint;
   if (!(await isEndpointAvailable(endpoint))) {
     const activePort = await readDevToolsActivePort(userDataDir);
+    console.info('[chrome] attachExistingChromeForProfile: DevToolsActivePort read', {
+      userDataDir,
+      activePort,
+      requestedPort: port,
+    });
     if (activePort) {
       const activeEndpoint = `http://${CDP_HOST}:${activePort}`;
       if (await isEndpointAvailable(activeEndpoint)) {
@@ -268,6 +279,11 @@ export async function attachExistingChromeForProfile(
   }
 
   if (!(await isEndpointAvailable(targetEndpoint))) {
+    console.error('[chrome] attachExistingChromeForProfile: no DevTools endpoint detected', {
+      requestedPort: port,
+      finalTargetEndpoint: targetEndpoint,
+      userDataDir,
+    });
     throw new Error(
       `Chrome is not running with remote debugging on port ${port}. ` +
         `Start Chrome for this session first (Start Chrome) or launch Chrome manually with "--remote-debugging-port=${port}".`
