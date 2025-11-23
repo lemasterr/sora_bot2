@@ -3,7 +3,7 @@ import path from 'path';
 import type { Browser, Page } from 'puppeteer-core';
 
 import { launchBrowserForSession } from '../chrome/cdp';
-import { getActiveChromeProfile, scanChromeProfiles, type ChromeProfile } from '../chrome/profiles';
+import { resolveChromeProfileForSession } from '../chrome/profiles';
 import { getConfig, type Config } from '../config/config';
 import { getSessionPaths } from '../sessions/repo';
 import type { Session } from '../sessions/types';
@@ -61,22 +61,6 @@ async function readLines(filePath: string): Promise<string[]> {
   }
 }
 
-async function resolveProfile(session: Session): Promise<ChromeProfile | null> {
-  const [profiles, config] = await Promise.all([scanChromeProfiles(), getConfig()]);
-  if (session.chromeProfileName) {
-    const preferred = profiles.find(
-      (p) =>
-        p.name === session.chromeProfileName &&
-        (config.chromeUserDataDir ? p.userDataDir === config.chromeUserDataDir : true)
-    );
-    if (preferred) return preferred;
-
-    const match = profiles.find((p) => p.name === session.chromeProfileName);
-    if (match) return match;
-  }
-  return getActiveChromeProfile();
-}
-
 async function preparePage(browser: Browser): Promise<Page> {
   const page = await browser.newPage();
   await page.goto('https://sora.chatgpt.com', { waitUntil: 'networkidle2' });
@@ -100,7 +84,7 @@ export async function runPrompts(session: Session): Promise<PromptsRunResult> {
   try {
     const [loadedConfig, paths] = await Promise.all([getConfig(), getSessionPaths(session)]);
     config = loadedConfig;
-    const profile = await resolveProfile(session);
+    const profile = await resolveChromeProfileForSession({ chromeProfileName: session.chromeProfileName });
 
     if (!profile) {
       return { ok: false, submitted, failed, error: 'No Chrome profile available' };

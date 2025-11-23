@@ -13,6 +13,10 @@ export type ChromeProfile = {
   isActive?: boolean;
 };
 
+export type SessionProfilePreference = {
+  chromeProfileName?: string | null;
+};
+
 let cachedProfiles: ChromeProfile[] | null = null;
 
 function slugifyProfileName(name: string): string {
@@ -204,6 +208,28 @@ export async function getActiveChromeProfile(): Promise<ChromeProfile | null> {
   if (profile) return profile;
 
   return cachedProfiles?.find((p) => p.name === config.chromeActiveProfileName) ?? null;
+}
+
+export async function resolveChromeProfileForSession(
+  preference?: SessionProfilePreference
+): Promise<ChromeProfile | null> {
+  const [profiles, config] = await Promise.all([scanChromeProfiles(), getConfig()]);
+
+  const desiredName = preference?.chromeProfileName ?? config.chromeActiveProfileName ?? null;
+  if (desiredName) {
+    const preferred = profiles.find(
+      (p) => p.name === desiredName && (config.chromeUserDataDir ? p.userDataDir === config.chromeUserDataDir : true)
+    );
+    if (preferred) return preferred;
+
+    const match = profiles.find((p) => p.name === desiredName);
+    if (match) return match;
+  }
+
+  const active = await getActiveChromeProfile();
+  if (active) return active;
+
+  return profiles[0] ?? null;
 }
 
 export async function cloneActiveChromeProfile(): Promise<{ ok: boolean; profile?: ChromeProfile; message?: string; error?: string }> {

@@ -5,8 +5,8 @@ import {
   listChromeProfiles,
   scanChromeProfiles,
   setActiveChromeProfile,
-  getActiveChromeProfile,
   cloneActiveChromeProfile,
+  resolveChromeProfileForSession,
 } from './chrome/profiles';
 import { getSession, listSessions, saveSession, deleteSession } from './sessions/repo';
 import { runPrompts, cancelPrompts } from './automation/promptsRunner';
@@ -65,15 +65,6 @@ function logSession(sessionId: string, scope: string, level: 'info' | 'error', m
   sessionLogBroker.log(sessionId, entry);
 }
 
-async function resolveSessionProfile(session: Session) {
-  if (session.chromeProfileName) {
-    const profiles = await scanChromeProfiles();
-    const found = profiles.find((p) => p.name === session.chromeProfileName);
-    if (found) return found;
-  }
-  return getActiveChromeProfile();
-}
-
 async function findSessionByKey(key: string): Promise<Session | null> {
   const direct = await getSession(key);
   if (direct) return direct as Session;
@@ -87,7 +78,7 @@ async function getOrLaunchManualBrowser(session: Session): Promise<Browser> {
     return existing;
   }
 
-  const profile = await resolveSessionProfile(session);
+  const profile = await resolveChromeProfileForSession({ chromeProfileName: session.chromeProfileName });
   if (!profile) {
     throw new Error('No Chrome profile available');
   }
@@ -190,7 +181,7 @@ handle('sessions:command', async (sessionId: string, action: SessionCommandActio
 
   try {
     if (action === 'startChrome') {
-      const profile = await resolveSessionProfile(session as Session);
+      const profile = await resolveChromeProfileForSession({ chromeProfileName: session.chromeProfileName });
       if (!profile) throw new Error('No Chrome profile available');
       const existing = manualBrowsers.get(session.id);
       if (existing) {

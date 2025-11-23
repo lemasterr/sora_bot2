@@ -5,7 +5,7 @@ import type { RunResult } from '../../shared/types';
 import { configureDownloads, newPage, type SessionRunContext } from './chromeController';
 import { getOrLaunchChromeForProfile } from '../chrome/manager';
 import { resolveSessionCdpPort } from '../utils/ports';
-import { getActiveChromeProfile, scanChromeProfiles, type ChromeProfile } from '../chrome/profiles';
+import { resolveChromeProfileForSession, type ChromeProfile } from '../chrome/profiles';
 
 const delay = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
 
@@ -67,11 +67,8 @@ const closeBrowserSafe = async (browser: Browser | null) => {
 };
 
 const resolveProfileForContext = async (ctx: SessionRunContext): Promise<ChromeProfile> => {
-  // Prefer the globally active profile; if unavailable, fall back to the first scanned profile.
-  const profiles = await scanChromeProfiles();
-  const active = await getActiveChromeProfile();
-  if (active) return active;
-  if (profiles.length > 0) return profiles[0];
+  const profile = await resolveChromeProfileForSession({ chromeProfileName: ctx.config.chromeActiveProfileName });
+  if (profile) return profile;
   throw new Error('No Chrome profile available');
 };
 

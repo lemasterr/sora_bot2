@@ -3,7 +3,7 @@ import path from 'path';
 import type { Browser, Page } from 'puppeteer-core';
 
 import { launchBrowserForSession } from '../chrome/cdp';
-import { getActiveChromeProfile, scanChromeProfiles, type ChromeProfile } from '../chrome/profiles';
+import { resolveChromeProfileForSession } from '../chrome/profiles';
 import { getConfig, type Config } from '../config/config';
 import { getSessionPaths } from '../sessions/repo';
 import type { Session } from '../sessions/types';
@@ -56,22 +56,6 @@ async function readLines(filePath: string): Promise<string[]> {
 function safeFileName(title: string): string {
   const sanitized = title.replace(/[\\/:*?"<>|]/g, '_');
   return sanitized.length > 80 ? sanitized.slice(0, 80) : sanitized;
-}
-
-async function resolveProfile(session: Session): Promise<ChromeProfile | null> {
-  const [profiles, config] = await Promise.all([scanChromeProfiles(), getConfig()]);
-  if (session.chromeProfileName) {
-    const preferred = profiles.find(
-      (p) =>
-        p.name === session.chromeProfileName &&
-        (config.chromeUserDataDir ? p.userDataDir === config.chromeUserDataDir : true)
-    );
-    if (preferred) return preferred;
-
-    const match = profiles.find((p) => p.name === session.chromeProfileName);
-    if (match) return match;
-  }
-  return getActiveChromeProfile();
 }
 
 async function configureDownloads(page: Page, downloadsDir: string): Promise<void> {
@@ -153,7 +137,7 @@ export async function runDownloads(session: Session, maxVideos = 0): Promise<Dow
   try {
     const [loadedConfig, paths] = await Promise.all([getConfig(), getSessionPaths(session)]);
     config = loadedConfig;
-    const profile = await resolveProfile(session);
+    const profile = await resolveChromeProfileForSession({ chromeProfileName: session.chromeProfileName });
 
     if (!profile) {
       return { ok: false, downloaded, error: 'No Chrome profile available' };
