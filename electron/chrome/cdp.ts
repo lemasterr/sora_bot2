@@ -16,7 +16,7 @@ export async function launchBrowserForSession(
     headless: false,
     userDataDir: profile.userDataDir,
     args: [
-      `--profile-directory=${profile.profileDir}`,
+      `--profile-directory=${profile.profileDirectory ?? profile.profileDir ?? ''}`,
       `--remote-debugging-port=${cdpPort}`,
       '--no-sandbox',
       '--disable-setuid-sandbox',
