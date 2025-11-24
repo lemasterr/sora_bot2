@@ -59,10 +59,12 @@ contextBridge.exposeInMainWorld('electronAPI', {
   files: {
     read: (profileName?: string | null): Promise<unknown> => safeInvoke('files:read', profileName ?? null),
     save: (profileName: string | null, files: unknown): Promise<unknown> => safeInvoke('files:save', profileName, files),
+    openFolder: (profileName?: string | null): Promise<unknown> => safeInvoke('files:openFolder', profileName ?? null),
   },
   sessionFiles: {
     read: (profileName?: string | null): Promise<unknown> => safeInvoke('files:read', profileName ?? null),
     save: (profileName: string | null, files: unknown): Promise<unknown> => safeInvoke('files:save', profileName, files),
+    openFolder: (profileName?: string | null): Promise<unknown> => safeInvoke('files:openFolder', profileName ?? null),
   },
   autogen: {
     run: (sessionId: string): Promise<unknown> => safeInvoke('autogen:run', sessionId),

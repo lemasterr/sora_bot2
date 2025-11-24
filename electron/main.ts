@@ -21,7 +21,7 @@ import { pages } from '../core/config/pages';
 import { getDailyStats, getTopSessions } from './logging/history';
 import { getLastSelectorForSession, startInspectorForSession } from './automation/selectorInspector';
 import { runCleanupNow, scheduleDailyCleanup } from './maintenance/cleanup';
-import { readProfileFiles, saveProfileFiles } from './content/profileFiles';
+import { openProfileFolder, readProfileFiles, saveProfileFiles } from './content/profileFiles';
 import { sessionLogBroker } from './sessionLogs';
 import { launchBrowserForSession } from './chrome/cdp';
 import { shutdownAllChrome } from './chrome/manager';
@@ -246,6 +246,7 @@ handle('files:read', async (profileName?: string | null) => {
   return { ok: true, files };
 });
 handle('files:save', async (profileName: string | null, files) => saveProfileFiles(profileName, files));
+handle('files:openFolder', async (profileName?: string | null) => openProfileFolder(profileName));
 handle('sessions:runPrompts', async (id: string) => {
   const session = await getSession(id);
   if (!session) return { ok: false, error: 'Session not found' };
