@@ -105,6 +105,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
     },
     export: (): Promise<unknown> => safeInvoke('system:openLogs'),
     info: (): Promise<unknown> => safeInvoke('logging:info'),
+    clear: (): Promise<unknown> => safeInvoke('logging:clear'),
   },
   qa: {
     batchRun: (videoDir?: string): Promise<unknown> => safeInvoke('qa:batchRun', videoDir),

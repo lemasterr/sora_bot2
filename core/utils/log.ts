@@ -83,3 +83,18 @@ export function ensureLogDestination() {
   prepareLogFile();
   return { dir: resolvedLogDir, file: resolvedLogFile };
 }
+
+/**
+ * Truncate the current log file to start fresh without changing the resolved path.
+ */
+export function clearLogFile() {
+  const destination = ensureLogDestination();
+  if (!destination.file) return { ok: false, error: 'No writable log file' };
+
+  try {
+    fs.writeFileSync(destination.file, '', { encoding: 'utf-8' });
+    return { ok: true, file: destination.file };
+  } catch (error) {
+    return { ok: false, error: (error as Error)?.message || 'Failed to clear log file' };
+  }
+}

@@ -13,7 +13,7 @@ const sourceColor: Record<string, string> = {
 export function LogsPage() {
   const [logs, setLogs] = useState<AppLogEntry[]>([]);
   const [filters, setFilters] = useState<Set<LogSource>>(new Set(SOURCES));
-  const [exportMessage, setExportMessage] = useState<string>('');
+  const [actionMessage, setActionMessage] = useState<string>('');
   const logRef = useRef<HTMLDivElement>(null);
   const [apiError, setApiError] = useState<string | null>(null);
   const [logLocation, setLogLocation] = useState<string>('');
@@ -72,19 +72,37 @@ export function LogsPage() {
   };
 
   const exportLogs = async () => {
-    setExportMessage('');
+    setActionMessage('');
     const api = (window as any).electronAPI;
     const logsApi = api?.logs;
     if (!logsApi?.export) {
-      setExportMessage('Export is not available: Electron backend is missing.');
+      setActionMessage('Export is not available: Electron backend is missing.');
       return;
     }
 
     const result: any = await logsApi.export();
     if (result?.ok === false) {
-      setExportMessage(result.error || 'Failed to export logs');
+      setActionMessage(result.error || 'Failed to export logs');
     } else {
-      setExportMessage('Opened logs folder.');
+      setActionMessage('Opened logs folder.');
+    }
+  };
+
+  const clearLogFile = async () => {
+    setActionMessage('');
+    const api = (window as any).electronAPI;
+    const logsApi = api?.logs;
+    if (!logsApi?.clear) {
+      setActionMessage('Clear is not available: Electron backend is missing.');
+      return;
+    }
+
+    const result: any = await logsApi.clear();
+    if (result?.ok === false) {
+      setActionMessage(result.error || 'Failed to clear log file');
+    } else {
+      setLogs([]);
+      setActionMessage('Log file cleared.');
     }
   };
 
@@ -114,13 +132,21 @@ export function LogsPage() {
           >
             Export to file
           </button>
+          <button
+            onClick={clearLogFile}
+            className="rounded-lg border border-zinc-700 px-3 py-2 text-sm font-semibold text-zinc-100 hover:border-rose-500 hover:text-rose-100"
+          >
+            Clear log file
+          </button>
         </div>
       </div>
 
       {apiError && (
         <div className="rounded-lg border border-amber-700/70 bg-amber-900/30 px-4 py-2 text-sm text-amber-200">{apiError}</div>
       )}
-      {exportMessage && <div className="rounded-lg border border-emerald-700/70 bg-emerald-900/30 px-4 py-2 text-sm text-emerald-200">{exportMessage}</div>}
+      {actionMessage && (
+        <div className="rounded-lg border border-emerald-700/70 bg-emerald-900/30 px-4 py-2 text-sm text-emerald-200">{actionMessage}</div>
+      )}
 
       <div className="flex-1 overflow-hidden rounded-xl border border-zinc-800 bg-black/90">
         <div className="h-full overflow-y-auto p-4 font-mono text-sm text-gray-200" ref={logRef}>
