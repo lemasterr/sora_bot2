@@ -23,6 +23,8 @@ export const AutomatorPage: React.FC = () => {
   >({});
   const [draggingId, setDraggingId] = useState<string | null>(null);
 
+  const LOG_LIMIT = 200;
+
   const workflowStatusColor = STATUS_COLORS[status] ?? STATUS_COLORS.idle;
 
   useEffect(() => {
@@ -53,7 +55,7 @@ export const AutomatorPage: React.FC = () => {
     }
     const unsubscribe = window.electronAPI.pipeline.onProgress((progress: WorkflowProgress) => {
       const event = progress;
-      setLogs((prev) => [event, ...prev].slice(0, 6));
+      setLogs((prev) => [event, ...prev].slice(0, LOG_LIMIT));
 
       if (event.stepId === 'workflow') {
         if (event.status === 'running') setStatus('running');
@@ -67,7 +69,7 @@ export const AutomatorPage: React.FC = () => {
             [event.sessionId!]: {
               status: event.status,
               downloaded: event.downloadedCount ?? prev[event.sessionId!]?.downloaded,
-              message: event.message,
+              message: event.status === 'error' ? event.message : prev[event.sessionId!]?.message ?? event.message,
             },
           }));
         }
@@ -127,6 +129,45 @@ export const AutomatorPage: React.FC = () => {
     );
   };
 
+  const enabledSteps = useMemo(() => steps.filter((step) => step.enabled), [steps]);
+  const overallProgress = useMemo(() => {
+    if (enabledSteps.length === 0) return 0;
+    const score = enabledSteps.reduce((acc, step) => {
+      const stepStatus = stepStatuses[step.id]?.status;
+      if (stepStatus === 'success' || stepStatus === 'skipped' || stepStatus === 'error') return acc + 1;
+      if (stepStatus === 'running') return acc + 0.5;
+      return acc;
+    }, 0);
+    return Math.min(100, Math.round((score / enabledSteps.length) * 100));
+  }, [enabledSteps, stepStatuses]);
+
+  const sessionLimits = useMemo(
+    () => Object.fromEntries(sessions.map((session) => [session.id, session.maxVideos ?? 0])),
+    [sessions]
+  );
+
+  const formatTimestamp = (timestamp: number) => new Date(timestamp).toLocaleTimeString();
+
+  const clearLogs = () => setLogs([]);
+
+  const downloadLogs = () => {
+    if (logs.length === 0) return;
+    const content = logs
+      .map(
+        (log) =>
+          `${new Date(log.timestamp).toISOString()} [${log.stepId}] (${log.status})` +
+          `${log.sessionId ? ` [session:${log.sessionId}]` : ''} - ${log.message}`
+      )
+      .join('\n');
+    const blob = new Blob([content], { type: 'text/plain' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `workflow-log-${Date.now()}.txt`;
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
   return (
     <div className="grid gap-4 lg:grid-cols-[2fr_1fr]">
       <div className="space-y-3">
@@ -160,6 +201,27 @@ export const AutomatorPage: React.FC = () => {
           >
             Reset to defaults
           </button>
+        </div>
+
+        <div className="rounded-xl border border-zinc-700 bg-zinc-900 p-4">
+          <div className="mb-2 flex items-center justify-between">
+            <div>
+              <div className="text-sm font-semibold text-white">Общий прогресс пайплайна</div>
+              <p className="text-xs text-zinc-500">Выполнение включенных шагов</p>
+            </div>
+            <div className="text-sm font-semibold text-white">{overallProgress}%</div>
+          </div>
+          <div className="h-2 w-full rounded-full bg-zinc-800">
+            <div className="h-2 rounded-full bg-emerald-500 transition-all" style={{ width: `${overallProgress}%` }} />
+          </div>
+          <div className="mt-2 text-xs text-zinc-400">
+            Включено шагов: {enabledSteps.length}. Завершено: {
+              enabledSteps.filter((step) => {
+                const st = stepStatuses[step.id]?.status;
+                return st === 'success' || st === 'skipped' || st === 'error';
+              }).length
+            }
+          </div>
         </div>
 
         <div className="rounded-xl border border-zinc-700 bg-zinc-900 p-4">
@@ -253,18 +315,27 @@ export const AutomatorPage: React.FC = () => {
             const status = sessionStatuses[id]?.status ?? 'idle';
             const color = STATUS_COLORS[status] ?? STATUS_COLORS.idle;
             const downloaded = sessionStatuses[id]?.downloaded;
+            const max = sessionLimits[id] ?? 0;
+            const progress = max > 0 ? Math.min(100, Math.round(((downloaded ?? 0) / max) * 100)) : downloaded ? 100 : 0;
             return (
               <div key={id} className="flex items-center justify-between rounded-lg border border-zinc-800 bg-zinc-950/40 px-3 py-2">
-                <div>
-                  <div className="text-sm font-semibold text-white">{sessionNamesById[id] ?? id}</div>
-                  {sessionStatuses[id]?.message && (
-                    <div className="text-[11px] text-zinc-400">{sessionStatuses[id]?.message}</div>
-                  )}
-                </div>
-                <div className="flex items-center gap-2 text-xs text-zinc-300">
-                  {downloaded !== undefined && <span>{downloaded} downloaded</span>}
-                  <span className={`h-2 w-2 rounded-full ${color}`} />
-                  <span className="capitalize">{status}</span>
+                <div className="flex w-full flex-col gap-1">
+                  <div className="flex items-center justify-between">
+                    <div className="text-sm font-semibold text-white">{sessionNamesById[id] ?? id}</div>
+                    <div className="flex items-center gap-2 text-xs text-zinc-300">
+                      <span className={`h-2 w-2 rounded-full ${color}`} />
+                      <span className="capitalize">{status}</span>
+                    </div>
+                  </div>
+                  <div className="text-[11px] text-zinc-400">
+                    Сессия: скачано {downloaded ?? 0} видео{max ? ` / лимит ${max}` : ''}
+                  </div>
+                  <div className="text-[11px] text-zinc-400">
+                    Последняя ошибка: {sessionStatuses[id]?.message || 'Ошибок нет'}
+                  </div>
+                  <div className="h-2 w-full rounded-full bg-zinc-800">
+                    <div className="h-2 rounded-full bg-blue-500 transition-all" style={{ width: `${progress}%` }} />
+                  </div>
                 </div>
               </div>
             );
@@ -275,23 +346,38 @@ export const AutomatorPage: React.FC = () => {
       <div className="space-y-3 rounded-xl border border-zinc-700 bg-zinc-900 p-4">
         <div className="flex items-center justify-between">
           <div>
-            <h4 className="text-sm font-semibold text-white">Active Logs</h4>
-            <p className="text-xs text-zinc-500">Latest workflow events</p>
+            <h4 className="text-sm font-semibold text-white">Подробный лог запуска</h4>
+            <p className="text-xs text-zinc-500">Все события workflow с отметкой времени</p>
+          </div>
+          <div className="flex gap-2 text-xs">
+            <button
+              onClick={clearLogs}
+              className="rounded border border-zinc-700 px-2 py-1 text-zinc-200 transition hover:border-emerald-500"
+            >
+              Очистить лог
+            </button>
+            <button
+              onClick={downloadLogs}
+              className="rounded border border-zinc-700 px-2 py-1 text-zinc-200 transition hover:border-blue-500"
+            >
+              Скачать лог
+            </button>
           </div>
         </div>
         {warning && (
           <div className="rounded-lg border border-amber-500/60 bg-amber-500/10 px-3 py-2 text-xs text-amber-100">{warning}</div>
         )}
-        <div className="space-y-2 text-sm font-mono text-zinc-200">
+        <div className="space-y-2 overflow-y-auto rounded-lg border border-zinc-800 bg-zinc-950/70 p-2 text-xs font-mono text-zinc-200 max-h-80">
           {logs.length === 0 && <div className="text-zinc-500">No events yet.</div>}
           {logs.map((log, idx) => (
-            <div key={`${log.stepId}-${idx}`} className="rounded border border-zinc-800 bg-zinc-950/70 px-3 py-2">
-              <div className="flex items-center justify-between text-xs text-zinc-400">
-                <span className="capitalize">{log.stepId}</span>
+            <div key={`${log.stepId}-${idx}`} className="rounded bg-zinc-900/60 px-2 py-1">
+              <div className="flex items-center justify-between text-[11px] text-zinc-500">
+                <span>{formatTimestamp(log.timestamp)}</span>
                 <span className="capitalize">{log.status}</span>
               </div>
-              <div className="text-zinc-100">{log.message}</div>
-              {log.label && <div className="text-emerald-400">{log.label}</div>}
+              <div className="text-zinc-100">[{log.stepId}] {log.message}</div>
+              {log.sessionId && <div className="text-emerald-400">Сессия: {log.sessionId}</div>}
+              {log.label && <div className="text-blue-400">{log.label}</div>}
             </div>
           ))}
         </div>
