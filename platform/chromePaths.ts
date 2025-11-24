@@ -1,8 +1,6 @@
 import fs from 'fs';
 import path from 'path';
 
-import { getConfig } from '../config/config';
-
 const exists = (candidate: string | null | undefined): candidate is string => {
   if (!candidate) return false;
   try {
@@ -52,21 +50,37 @@ async function resolveFromPath(binaryName: string): Promise<string | null> {
   return null;
 }
 
-/**
- * Try to locate a system Google Chrome binary using config overrides,
- * an explicit environment variable, and finally well-known install locations
- * per platform. Returns null if nothing is found so the caller can present a
- * helpful error instead of silently falling back to bundled Chromium.
- */
-export async function findSystemChromeExecutable(): Promise<string | null> {
-  const config = await getConfig();
-
-  if (exists(config.chromeExecutablePath)) {
-    return config.chromeExecutablePath;
+async function readConfiguredChromePath(): Promise<string | null> {
+  try {
+    const { getConfig } = await import('../electron/config/config');
+    const config = await getConfig();
+    if (exists(config.chromeExecutablePath)) {
+      return config.chromeExecutablePath as string;
+    }
+  } catch {
+    // Optional: configuration may not be available in non-Electron contexts
   }
 
   if (exists(process.env.CHROME_BINARY)) {
     return process.env.CHROME_BINARY as string;
+  }
+
+  if (exists(process.env.SORA_CHROME_PATH)) {
+    return process.env.SORA_CHROME_PATH as string;
+  }
+
+  return null;
+}
+
+/**
+ * Try to locate a system Google Chrome binary using optional config overrides,
+ * environment hints, and well-known install locations per platform. Returns
+ * null if nothing is found so the caller can present a helpful error.
+ */
+export async function findSystemChromeExecutable(): Promise<string | null> {
+  const configured = await readConfiguredChromePath();
+  if (configured) {
+    return configured;
   }
 
   const candidates: string[] = [];
@@ -92,7 +106,8 @@ export async function findSystemChromeExecutable(): Promise<string | null> {
 export async function resolveChromeExecutablePath(): Promise<string> {
   const executablePath = await findSystemChromeExecutable();
   if (!executablePath) {
-    throw new Error('Не удалось найти Google Chrome. Укажите путь к браузеру в настройках.');
+    throw new Error('Не удалось найти Google Chrome. Укажите путь к браузеру в настройках и перезапустите сессию.');
   }
   return executablePath;
 }
+

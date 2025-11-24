@@ -221,7 +221,12 @@ async function ensureChromeWithCDP(profile: ChromeProfile, port: number): Promis
     extraArgs: profileDirectoryArg ? [`--profile-directory=${profileDirectoryArg}`] : [],
   });
 
-  await waitForCDP(port);
+  try {
+    await waitForCDP(port);
+  } catch (error) {
+    await terminateSpawnedProcess(launchResult.pid);
+    throw error;
+  }
 
   const resolvedEndpoint = `http://${CDP_HOST}:${launchResult.cdpPort}`;
   logInfo(

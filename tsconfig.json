@@ -13,6 +13,6 @@
     "types": ["node"],
     "allowSyntheticDefaultImports": true
   },
-  "include": ["electron", "src", "shared", "core", "vite.config.ts"],
+  "include": ["electron", "src", "shared", "core", "platform", "vite.config.ts"],
   "exclude": ["dist-electron"]
 }
