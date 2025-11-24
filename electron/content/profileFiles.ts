@@ -1,6 +1,7 @@
 import fs from 'fs/promises';
 import path from 'path';
 import type { SessionFiles } from '../../shared/types';
+import { shell } from 'electron';
 import { getConfig } from '../config/config';
 import { logError, logInfo } from '../logging/logger';
 import { ensureDir } from '../utils/fs';
@@ -31,7 +32,11 @@ function buildProfileFilenames(profileName: string) {
 async function readLines(filePath: string): Promise<string[]> {
   try {
     const raw = await fs.readFile(filePath, 'utf-8');
-    return raw.split(/\r?\n/).filter((line) => line.length > 0);
+    if (raw.includes('\u0000')) {
+      throw new Error('File contains null bytes and may be corrupted');
+    }
+
+    return sanitizeLines(raw.split(/\r?\n/));
   } catch (error) {
     if ((error as NodeJS.ErrnoException)?.code === 'ENOENT') return [];
     throw error;
@@ -40,7 +45,14 @@ async function readLines(filePath: string): Promise<string[]> {
 
 async function writeLines(filePath: string, lines: string[]): Promise<void> {
   await fs.mkdir(path.dirname(filePath), { recursive: true });
-  await fs.writeFile(filePath, lines.join('\n'), 'utf-8');
+  const sanitized = sanitizeLines(lines);
+  await fs.writeFile(filePath, sanitized.join('\n'), 'utf-8');
+}
+
+function sanitizeLines(lines: string[]): string[] {
+  return lines
+    .map((line) => line.trim())
+    .filter((line) => line.length > 0 && !/^[\u0000-\u001f]+$/.test(line));
 }
 
 export async function readProfileFiles(profileName?: string | null): Promise<SessionFiles> {
@@ -94,6 +106,23 @@ export async function saveProfileFiles(profileName: string | null, files: Sessio
   } catch (error) {
     const message = (error as Error).message;
     logError('profileFiles', `Failed to save files for ${normalizedName}: ${message}`);
+    return { ok: false, error: message };
+  }
+}
+
+export async function openProfileFolder(profileName?: string | null): Promise<{ ok: boolean; path?: string; error?: string }> {
+  const config = await getConfig();
+  const normalizedName = normalizeProfileName(profileName ?? config.chromeActiveProfileName);
+
+  try {
+    const promptsDir = await ensurePromptsDir(config.sessionsRoot);
+    const folderPath = path.join(promptsDir);
+    await shell.openPath(folderPath);
+    logInfo('profileFiles', `Opened profile folder for ${normalizedName}: ${folderPath}`);
+    return { ok: true, path: folderPath };
+  } catch (error) {
+    const message = (error as Error).message;
+    logError('profileFiles', `Failed to open folder for ${normalizedName}: ${message}`);
     return { ok: false, error: message };
   }
 }

@@ -1,6 +1,9 @@
 import fs from 'fs/promises';
 import path from 'path';
-import puppeteer, { type Browser, type Page } from 'puppeteer-core';
+import { type Browser, type Page } from 'puppeteer-core';
+import { pages } from '../../core/config/pages';
+import { runDownloadLoop } from '../../core/download/downloadFlow';
+import { selectors, waitForVisible } from '../../core/selectors/selectors';
 
 import { getConfig, type Config } from '../config/config';
 import { getSessionPaths } from '../sessions/repo';
@@ -11,6 +14,7 @@ import { registerSessionPage, unregisterSessionPage } from './selectorInspector'
 import { runPostDownloadHook } from './hooks';
 import { ensureDir } from '../utils/fs';
 import { logInfo } from '../logging/logger';
+import { ensureBrowserForSession } from './sessionChrome';
 
 function delay(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -29,16 +33,6 @@ export type DownloadRunResult = {
   error?: string;
 };
 
-const CARD_SELECTOR = "a[href*='/d/']";
-const RIGHT_PANEL_SELECTOR = "div.absolute.right-0.top-0";
-const KEBAB_IN_RIGHT_PANEL_SELECTOR =
-  `${RIGHT_PANEL_SELECTOR} button[aria-haspopup='menu']:not([aria-label='Settings'])`;
-const MENU_ROOT_SELECTOR = "[role='menu']";
-const MENU_ITEM_SELECTOR = "[role='menuitem']";
-
-const DOWNLOAD_MENU_LABELS = ['Download', 'Скачать', 'Download video', 'Save video', 'Export'];
-
-const DEFAULT_CDP_PORT = 9222;
 const WATCHDOG_TIMEOUT_MS = 120_000;
 const MAX_WATCHDOG_RESTARTS = 2;
 
@@ -86,132 +80,64 @@ async function configureDownloads(page: Page, downloadsDir: string): Promise<voi
   });
 }
 
-function resolveCdpEndpoint(config: Config): string {
-  const envEndpoint = process.env.CDP_ENDPOINT?.trim();
-  if (envEndpoint) return envEndpoint;
-
-  const port = Number(config.cdpPort ?? DEFAULT_CDP_PORT);
-  const safePort = Number.isFinite(port) ? port : DEFAULT_CDP_PORT;
-  return `http://127.0.0.1:${safePort}`;
-}
-
 async function preparePage(browser: Browser, downloadDir: string): Promise<Page> {
   const context = browser.browserContexts()[0] ?? browser.defaultBrowserContext();
-  const pages = await context.pages();
-  const existing = pages.find((p) => p.url().startsWith('https://sora.chatgpt.com'));
+  const pagesList = await context.pages();
+  const existing = pagesList.find((p) => p.url().startsWith(pages.baseUrl));
   const page = existing ?? (await context.newPage());
 
   await configureDownloads(page, downloadDir);
-  const draftsUrl = 'https://sora.chatgpt.com/drafts';
-  if (!page.url().startsWith(draftsUrl)) {
-    await page.goto(draftsUrl, { waitUntil: 'networkidle2' });
+  if (!page.url().startsWith(pages.draftsUrl)) {
+    await page.goto(pages.draftsUrl, { waitUntil: 'networkidle2' });
   }
-  await page.waitForSelector(CARD_SELECTOR, { timeout: 60_000 }).catch(() => undefined);
+  await waitForVisible(page, selectors.cardItem).catch(() => undefined);
   return page;
 }
 
-async function waitForDownload(page: Page, timeoutMs: number): Promise<void> {
-  const client = await page.target().createCDPSession();
+type CardMeta = {
+  url: string;
+  index: number;
+  label: string;
+  signature: string;
+};
 
-  return new Promise<void>((resolve, reject) => {
-    const timeout = setTimeout(() => {
-      cleanup();
-      reject(new Error('Download timed out'));
-    }, timeoutMs);
-
-    const handler = (event: { state?: string }) => {
-      if (event.state === 'completed') {
-        cleanup();
-        resolve();
-      } else if (event.state === 'canceled') {
-        cleanup();
-        reject(new Error('Download canceled'));
-      }
-    };
-
-    const cleanup = () => {
-      clearTimeout(timeout);
-      client.off('Page.downloadProgress', handler as never);
-    };
-
-    client.on('Page.downloadProgress', handler as never);
-  });
-}
-
-async function openKebabMenu(page: Page): Promise<void> {
-  const kebab = await page.$(KEBAB_IN_RIGHT_PANEL_SELECTOR);
-  if (!kebab) {
-    throw new Error('Download menu button not found in right panel');
-  }
-
-  const box = await kebab.boundingBox();
-  if (box) {
-    await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
-    await delay(150);
-  }
-
-  await kebab.click();
-  await page.waitForSelector(MENU_ROOT_SELECTOR, { timeout: 8000 });
-}
-
-async function clickDownloadInMenu(page: Page): Promise<void> {
-  const menuRoot = await page.$(MENU_ROOT_SELECTOR);
-  if (!menuRoot) {
-    throw new Error('Download menu root not found');
-  }
-
-  const items = await menuRoot.$$(MENU_ITEM_SELECTOR);
-  if (items.length === 0) {
-    throw new Error('No menu items found in download menu');
-  }
-
-  let candidate: any | null = null;
-
-  for (const item of items) {
-    const text = (await page.evaluate((el) => el.textContent ?? '', item)).trim();
-    for (const label of DOWNLOAD_MENU_LABELS) {
-      if (text.toLowerCase().includes(label.toLowerCase())) {
-        candidate = item;
-        break;
-      }
-    }
-    if (candidate) break;
-  }
-
-  if (!candidate) {
-    candidate = items[0];
-  }
-
-  await candidate.click();
-}
-
-async function findLatestMp4(downloadDir: string): Promise<string | null> {
-  const entries = await fs.readdir(downloadDir, { withFileTypes: true });
-  let latest: { file: string; mtime: number } | null = null;
-
-  for (const entry of entries) {
-    if (!entry.isFile()) continue;
-    if (!entry.name.toLowerCase().endsWith('.mp4')) continue;
-
-    const fullPath = path.join(downloadDir, entry.name);
-    const stats = await fs.stat(fullPath);
-
-    if (!latest || stats.mtimeMs > latest.mtime) {
-      latest = { file: fullPath, mtime: stats.mtimeMs };
-    }
-  }
-
-  return latest?.file ?? null;
-}
-
-async function getCurrentVideoSignature(page: Page): Promise<string> {
-  return page.evaluate(() => {
+async function getCurrentCardMeta(page: Page): Promise<CardMeta> {
+  return page.evaluate((cardSelector) => {
     const video = document.querySelector('video') as HTMLVideoElement | null;
     const src = video?.currentSrc || video?.src || '';
     const path = window.location.pathname || '';
     const poster = video?.getAttribute('poster') ?? '';
-    return `${path}::${src}::${poster}`;
-  });
+    const cards = Array.from(document.querySelectorAll(cardSelector)) as HTMLAnchorElement[];
+    let activeIndex = -1;
+    let activeLabel = '';
+
+    const normalizedPath = path.split('/').filter(Boolean).pop();
+
+    cards.forEach((card, idx) => {
+      if (activeIndex !== -1) return;
+      const href = card.getAttribute('href') ?? '';
+      const text = (card.textContent ?? '').trim();
+      const ariaCurrent = card.getAttribute('aria-current');
+
+      if (href && normalizedPath && href.includes(normalizedPath)) {
+        activeIndex = idx;
+        activeLabel = text;
+        return;
+      }
+
+      if (ariaCurrent === 'page' || card.classList.contains('active') || card.classList.contains('selected')) {
+        activeIndex = idx;
+        activeLabel = text;
+      }
+    });
+
+    return {
+      url: window.location.href,
+      index: activeIndex,
+      label: activeLabel,
+      signature: `${path}::${src}::${poster}`,
+    } satisfies CardMeta;
+  }, selectors.cardItem);
 }
 
 async function longSwipeOnce(page: Page): Promise<void> {
@@ -263,56 +189,73 @@ async function scrollToNextCardInFeed(
   pauseMs = 1800,
   timeoutMs = 9000
 ): Promise<boolean> {
-  const startUrl = page.url();
-  const startSig = await getCurrentVideoSignature(page);
+  const startMeta = await getCurrentCardMeta(page);
+  const deadline = Date.now() + timeoutMs;
 
-  const waitForChange = async (totalMs: number): Promise<boolean> => {
-    const deadline = Date.now() + totalMs;
-    while (Date.now() < deadline) {
-      const [url, sig] = await Promise.all([
-        Promise.resolve(page.url()),
-        getCurrentVideoSignature(page),
-      ]);
-      if (url !== startUrl || sig !== startSig) {
-        return true;
+  const waitForChange = async (totalMs: number): Promise<CardMeta | null> => {
+    const limit = Date.now() + totalMs;
+    while (Date.now() < limit) {
+      const meta = await getCurrentCardMeta(page);
+      const indexChanged = meta.index !== -1 && meta.index !== startMeta.index;
+      const labelChanged = meta.label && meta.label !== startMeta.label;
+      const urlChanged = meta.url !== startMeta.url;
+      const signatureChanged = meta.signature !== startMeta.signature;
+
+      if (indexChanged || labelChanged || urlChanged || signatureChanged) {
+        return meta;
       }
-      await delay(180);
+      await delay(220);
     }
-    const [finalUrl, finalSig] = await Promise.all([
-      Promise.resolve(page.url()),
-      getCurrentVideoSignature(page),
-    ]);
-    return finalUrl !== startUrl || finalSig !== startSig;
+    const finalMeta = await getCurrentCardMeta(page);
+    const indexChanged = finalMeta.index !== -1 && finalMeta.index !== startMeta.index;
+    const labelChanged = finalMeta.label && finalMeta.label !== startMeta.label;
+    const urlChanged = finalMeta.url !== startMeta.url;
+    const signatureChanged = finalMeta.signature !== startMeta.signature;
+    return indexChanged || labelChanged || urlChanged || signatureChanged ? finalMeta : null;
   };
 
-  for (let attempt = 0; attempt < 3; attempt += 1) {
+  const logProgress = (message: string) => {
+    logInfo('downloader', `[Feed] ${message}`);
+  };
+
+  const tryReadyPanel = async () => {
+    try {
+      await waitForVisible(page, selectors.rightPanel, 6_500);
+    } catch {
+      // ignore panel wait errors
+    }
+  };
+
+  for (let attempt = 0; attempt < 3 && Date.now() < deadline; attempt += 1) {
+    logProgress(`Scroll attempt ${attempt + 1}`);
     await longSwipeOnce(page);
-    if (await waitForChange(Math.floor(timeoutMs * 0.6))) {
-      try {
-        await page.waitForSelector(RIGHT_PANEL_SELECTOR, { timeout: 6500 });
-      } catch {
-        // ignore
-      }
+    const changedMeta = await waitForChange(Math.floor(timeoutMs * 0.5));
+    if (changedMeta) {
+      logProgress(
+        `Moved to card index ${changedMeta.index} (${changedMeta.label || 'no-label'}) from ${startMeta.index}`
+      );
+      await tryReadyPanel();
       return true;
     }
     await keyNudgeForNextCard(page);
-    await delay(Math.floor(pauseMs * 0.9));
+    await delay(Math.floor(pauseMs * 0.8));
   }
 
+  logProgress('Fallback scrollBy engaged');
   await page.evaluate(() => {
-    window.scrollBy(0, window.innerHeight * 0.95);
+    window.scrollBy(window.innerWidth * 0.1, window.innerHeight * 0.95);
   });
   await keyNudgeForNextCard(page);
-  await delay(900);
-  if (await waitForChange(Math.floor(timeoutMs * 0.9))) {
-    try {
-      await page.waitForSelector(RIGHT_PANEL_SELECTOR, { timeout: 6500 });
-    } catch {
-      // ignore
-    }
+  const fallbackChanged = await waitForChange(Math.max(600, deadline - Date.now()));
+  if (fallbackChanged) {
+    logProgress(
+      `Moved to card index ${fallbackChanged.index} (${fallbackChanged.label || 'no-label'}) via fallback`
+    );
+    await tryReadyPanel();
     return true;
   }
 
+  logProgress('Failed to move to next card before timeout');
   return false;
 }
 
@@ -338,14 +281,8 @@ export async function runDownloads(
   try {
     const [loadedConfig, paths] = await Promise.all([getConfig(), getSessionPaths(session)]);
     config = loadedConfig;
-    const cdpEndpoint = resolveCdpEndpoint(config);
 
-    const connected = (await puppeteer.connect({
-      browserURL: cdpEndpoint,
-      defaultViewport: null,
-    })) as Browser & { __soraManaged?: boolean };
-
-    connected.__soraManaged = false;
+    const { browser: connected } = await ensureBrowserForSession(session, config);
     browser = connected;
 
     const prepare = async () => {
@@ -369,10 +306,8 @@ export async function runDownloads(
       watchdogTimeouts += 1;
       if (watchdogTimeouts >= MAX_WATCHDOG_RESTARTS) {
         fatalWatchdog = true;
-        return;
+        cancelFlag.cancelled = true;
       }
-      await prepare();
-      setTimeout(() => startWatchdog(runId, WATCHDOG_TIMEOUT_MS, onTimeout), 0);
     };
 
     await prepare();
@@ -381,92 +316,63 @@ export async function runDownloads(
     const explicitCap = Number.isFinite(maxVideos) && maxVideos > 0 ? maxVideos : 0;
     const fallbackCap = Number.isFinite(session.maxVideos) && session.maxVideos > 0 ? session.maxVideos : 0;
     const hardCap = explicitCap > 0 ? explicitCap : fallbackCap;
+    const draftsUrl = pages.draftsUrl;
 
-    const draftsUrl = 'https://sora.chatgpt.com/drafts';
-    const seenUrls = new Set<string>();
-
-    if (page) {
-      assertPage(page);
-      const activePage: Page = page;
-
-      await activePage.goto(draftsUrl, { waitUntil: 'networkidle2' }).catch(() => undefined);
-      await activePage.waitForSelector(CARD_SELECTOR, { timeout: 60_000 }).catch(() => undefined);
-
-      const cards = await activePage.$$(CARD_SELECTOR);
-      if (cards.length === 0) {
-        logInfo('downloader', `No draft cards found in drafts for session ${session.name}`);
-        return { ok: true, downloaded };
-      }
-
-      await cards[0].click();
-      await activePage.waitForNavigation({ waitUntil: 'networkidle2' }).catch(() => undefined);
-      await activePage.waitForSelector(RIGHT_PANEL_SELECTOR, { timeout: 60_000 }).catch(() => undefined);
+    if (!page) {
+      return { ok: false, downloaded, error: 'No active page' };
     }
 
-    while (!fatalWatchdog && !cancelFlag.cancelled) {
-      if (!page) break;
+    assertPage(page);
+    const activePage: Page = page;
+    await activePage.goto(draftsUrl, { waitUntil: 'networkidle2' }).catch(() => undefined);
+    await waitForVisible(activePage, selectors.cardItem).catch(() => undefined);
 
-      if (hardCap > 0 && downloaded >= hardCap) {
-        logInfo('downloader', `Reached download limit ${hardCap} for session ${session.name}`);
-        break;
-      }
-
-      heartbeat(runId);
-      assertPage(page);
-      const activePage: Page = page;
-
-      const currentUrl = activePage.url();
-      if (seenUrls.has(currentUrl)) {
+    const downloadLimit = hardCap > 0 ? hardCap : Number.MAX_SAFE_INTEGER;
+    const loopResult = await runDownloadLoop({
+      page: activePage,
+      maxDownloads: downloadLimit,
+      downloadDir: paths.downloadDir,
+      waitForReadySelectors: [selectors.rightPanel],
+      downloadButtonSelector: selectors.downloadButton,
+      swipeNext: async () => {
         const moved = await scrollToNextCardInFeed(activePage);
         if (!moved) {
-          logInfo('downloader', '[Feed] Current card URL already seen, stopping.');
-          break;
+          throw new Error('Не удалось перейти к следующей карточке');
         }
-        continue;
-      }
-      seenUrls.add(currentUrl);
+      },
+      onStateChange: () => heartbeat(runId),
+      isCancelled: () => cancelFlag.cancelled || fatalWatchdog,
+    });
 
-      const titleFromList = titles[downloaded];
+    for (let index = 0; index < loopResult.savedFiles.length; index += 1) {
+      const savedPath = loopResult.savedFiles[index];
+      const titleFromList = titles[downloaded + index];
       const titleFromPage = (await activePage.title()) || '';
-      const title = titleFromList || titleFromPage || `video_${downloaded + 1}`;
+      const title = titleFromList || titleFromPage || `video_${downloaded + index + 1}`;
 
-      try {
-        await activePage.waitForSelector(RIGHT_PANEL_SELECTOR, { timeout: 60_000 });
-
-        const downloadPromise = waitForDownload(activePage, config.downloadTimeoutMs);
-        await openKebabMenu(activePage);
-        await clickDownloadInMenu(activePage);
-        await downloadPromise;
-
-        const latest = await findLatestMp4(paths.downloadDir);
-        if (latest) {
-          const targetName = `${safeFileName(title)}.mp4`;
-          const targetPath = path.join(paths.downloadDir, targetName);
-          if (latest !== targetPath) {
-            await fs.rename(latest, targetPath);
-          }
-          await runPostDownloadHook(targetPath, title);
+      const targetName = `${safeFileName(title)}.mp4`;
+      const targetPath = path.join(paths.downloadDir, targetName);
+      if (savedPath !== targetPath) {
+        try {
+          await fs.rename(savedPath, targetPath);
+        } catch {
+          // fallback: keep original path
         }
-
-        downloaded += 1;
-        logInfo('downloader', `[Feed] Downloaded ${downloaded} videos for session ${session.name}`);
-      } catch (error) {
-        logInfo('downloader', `[Feed] Error during card download: ${(error as Error)?.message ?? String(error)}`);
       }
+
+      const finalPath = fs
+        .access(targetPath)
+        .then(() => targetPath)
+        .catch(() => savedPath ?? targetPath);
+
+      await runPostDownloadHook(await finalPath, title);
+      downloaded += 1;
+      logInfo('downloader', `[Feed] Downloaded ${downloaded} videos for session ${session.name}`);
+      heartbeat(runId);
 
       if (hardCap > 0 && downloaded >= hardCap) {
-        logInfo('downloader', `Reached download limit ${hardCap} for session ${session.name}`);
         break;
       }
-
-      const moved = await scrollToNextCardInFeed(activePage);
-      if (!moved) {
-        logInfo('downloader', '[Feed] Could not scroll to next card — stopping.');
-        break;
-      }
-
-      heartbeat(runId);
-      await delay(600);
     }
 
     if (fatalWatchdog) {

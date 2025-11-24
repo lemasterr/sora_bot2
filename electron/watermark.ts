@@ -4,6 +4,7 @@ import os from 'os';
 import { execFile } from 'child_process';
 import { promisify } from 'util';
 import imageSize from 'image-size';
+import { logError } from '../core/utils/log';
 import { randomUUID } from 'crypto';
 import type {
   Config,
@@ -79,7 +80,7 @@ const buildSuggestedRect = (framePath: string, templatePath?: string): Watermark
       label: 'Auto-detected'
     };
   } catch (error) {
-    console.error('Failed to build suggested rect', error);
+    logError('Failed to build suggested rect', error);
     return null;
   }
 };

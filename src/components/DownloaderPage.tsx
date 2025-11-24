@@ -62,7 +62,7 @@ export function DownloaderPage() {
   const updateLastDownloaded = async (sessionName: string) => {
     if (!window.electronAPI) return;
     const videos = await window.electronAPI.listDownloadedVideos();
-    const latest = videos.find((video) => video.sessionName === sessionName);
+    const latest = videos.find((video: any) => video.sessionName === sessionName);
     if (latest) {
       setLastFile(latest.fileName);
     }

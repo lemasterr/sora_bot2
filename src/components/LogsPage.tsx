@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import type { AppLogEntry, LogSource } from '../shared/types';
+import type { AppLogEntry, LogSource } from '../../shared/types';
 
 const SOURCES: LogSource[] = ['Chrome', 'Autogen', 'Downloader', 'Pipeline'];
 
@@ -13,9 +13,10 @@ const sourceColor: Record<string, string> = {
 export function LogsPage() {
   const [logs, setLogs] = useState<AppLogEntry[]>([]);
   const [filters, setFilters] = useState<Set<LogSource>>(new Set(SOURCES));
-  const [exportMessage, setExportMessage] = useState<string>('');
+  const [actionMessage, setActionMessage] = useState<string>('');
   const logRef = useRef<HTMLDivElement>(null);
   const [apiError, setApiError] = useState<string | null>(null);
+  const [logLocation, setLogLocation] = useState<string>('');
 
   useEffect(() => {
     const api = (window as any).electronAPI;
@@ -24,6 +25,17 @@ export function LogsPage() {
       setApiError('Logging API is not available. Please run the Sora desktop app.');
       return;
     }
+
+    logsApi
+      .info()
+      .then((result: any) => {
+        if (result?.ok && result.dir) {
+          setLogLocation(result.file || result.dir);
+        }
+      })
+      .catch(() => {
+        // non-fatal: UI will simply hide location text
+      });
 
     const unsubscribe = logsApi.subscribe((entry: AppLogEntry) => {
       setLogs((prev) => [...prev.slice(-900), entry]);
@@ -60,19 +72,37 @@ export function LogsPage() {
   };
 
   const exportLogs = async () => {
-    setExportMessage('');
+    setActionMessage('');
     const api = (window as any).electronAPI;
     const logsApi = api?.logs;
     if (!logsApi?.export) {
-      setExportMessage('Export is not available: Electron backend is missing.');
+      setActionMessage('Export is not available: Electron backend is missing.');
       return;
     }
 
     const result: any = await logsApi.export();
     if (result?.ok === false) {
-      setExportMessage(result.error || 'Failed to export logs');
+      setActionMessage(result.error || 'Failed to export logs');
     } else {
-      setExportMessage('Opened logs folder.');
+      setActionMessage('Opened logs folder.');
+    }
+  };
+
+  const clearLogFile = async () => {
+    setActionMessage('');
+    const api = (window as any).electronAPI;
+    const logsApi = api?.logs;
+    if (!logsApi?.clear) {
+      setActionMessage('Clear is not available: Electron backend is missing.');
+      return;
+    }
+
+    const result: any = await logsApi.clear();
+    if (result?.ok === false) {
+      setActionMessage(result.error || 'Failed to clear log file');
+    } else {
+      setLogs([]);
+      setActionMessage('Log file cleared.');
     }
   };
 
@@ -82,6 +112,7 @@ export function LogsPage() {
         <div>
           <h2 className="text-xl font-semibold text-white">Activity Logs</h2>
           <p className="text-sm text-zinc-400">Global stream across Chrome, automation, downloads, and pipelines.</p>
+          {logLocation && <p className="text-xs text-zinc-500">Location: {logLocation}</p>}
         </div>
         <div className="flex items-center gap-3">
           <div className="flex items-center gap-2 text-xs text-zinc-300">
@@ -101,13 +132,21 @@ export function LogsPage() {
           >
             Export to file
           </button>
+          <button
+            onClick={clearLogFile}
+            className="rounded-lg border border-zinc-700 px-3 py-2 text-sm font-semibold text-zinc-100 hover:border-rose-500 hover:text-rose-100"
+          >
+            Clear log file
+          </button>
         </div>
       </div>
 
       {apiError && (
         <div className="rounded-lg border border-amber-700/70 bg-amber-900/30 px-4 py-2 text-sm text-amber-200">{apiError}</div>
       )}
-      {exportMessage && <div className="rounded-lg border border-emerald-700/70 bg-emerald-900/30 px-4 py-2 text-sm text-emerald-200">{exportMessage}</div>}
+      {actionMessage && (
+        <div className="rounded-lg border border-emerald-700/70 bg-emerald-900/30 px-4 py-2 text-sm text-emerald-200">{actionMessage}</div>
+      )}
 
       <div className="flex-1 overflow-hidden rounded-xl border border-zinc-800 bg-black/90">
         <div className="h-full overflow-y-auto p-4 font-mono text-sm text-gray-200" ref={logRef}>

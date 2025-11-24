@@ -34,6 +34,7 @@ export interface ManagedSession {
   promptCount?: number;
   titleCount?: number;
   hasFiles?: boolean;
+  downloadedCount?: number;
 }
 
 // The Config type mirrors the canonical backend shape from electron/config/config.ts.
@@ -140,32 +141,62 @@ export interface WatermarkCleanResult {
   error?: string;
 }
 
-export type PipelineStepType =
-  | 'session_prompts'
-  | 'session_images'
-  | 'session_mix'
-  | 'session_download'
-  | 'session_watermark'
-  | 'session_chrome'
-  | 'global_blur'
-  | 'global_merge'
-  | 'global_watermark'
-  | 'global_probe'
-  | 'pipeline';
+export type DownloadWorkflowStepId = `downloadSession${number}`;
 
-export interface PipelineStep {
-  id?: string; // optional client-side identifier
-  type: PipelineStepType;
-  sessionIds?: string[];
-  limit?: number;
-  group?: string;
+export type WorkflowStepId =
+  | 'openSessions'
+  | DownloadWorkflowStepId
+  | 'blurVideos'
+  | 'mergeVideos'
+  | 'cleanMetadata';
+
+export interface WorkflowClientStep {
+  id: WorkflowStepId;
+  label: string;
+  enabled: boolean;
+  dependsOn?: WorkflowStepId[];
+  sessionId?: string;
 }
 
-export interface PipelineProgress {
-  stepIndex: number; // -1 reserved for pipeline-level events
-  stepType: PipelineStepType;
-  status: 'running' | 'success' | 'error';
+export interface WorkflowProgress {
+  stepId: WorkflowStepId | 'workflow';
+  label: string;
+  status: 'running' | 'success' | 'error' | 'skipped';
   message: string;
-  session?: string;
   timestamp: number;
+  sessionId?: string;
+  downloadedCount?: number;
+}
+
+export function buildDynamicWorkflow(
+  sessions: ManagedSession[],
+  selectedSessionIds?: string[]
+): WorkflowClientStep[] {
+  const selected =
+    selectedSessionIds && selectedSessionIds.length > 0
+      ? sessions.filter((session) => selectedSessionIds.includes(session.id))
+      : sessions;
+
+  const steps: WorkflowClientStep[] = [];
+
+  steps.push({ id: 'openSessions', label: 'Open all sessions', enabled: true });
+
+  const downloadStepIds: DownloadWorkflowStepId[] = [];
+  selected.forEach((session, index) => {
+    const id = `downloadSession${index + 1}` as DownloadWorkflowStepId;
+    downloadStepIds.push(id);
+    steps.push({
+      id,
+      label: `Download (${session.name})`,
+      enabled: true,
+      dependsOn: ['openSessions'],
+      sessionId: session.id,
+    });
+  });
+
+  steps.push({ id: 'blurVideos', label: 'Blur videos', enabled: true, dependsOn: downloadStepIds });
+  steps.push({ id: 'mergeVideos', label: 'Merge videos', enabled: true, dependsOn: ['blurVideos'] });
+  steps.push({ id: 'cleanMetadata', label: 'Clean metadata', enabled: true, dependsOn: ['mergeVideos'] });
+
+  return steps;
 }

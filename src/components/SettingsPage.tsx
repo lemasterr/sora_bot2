@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { useAppStore } from '../store';
-import type { ChromeProfile, Config } from '../shared/types';
+import type { ChromeProfile, Config } from '../../shared/types';
 
 const DEFAULT_CONFIG: Config = {
   sessionsRoot: '',
@@ -10,6 +10,7 @@ const DEFAULT_CONFIG: Config = {
   chromeActiveProfileName: null,
   chromeProfileId: null,
   chromeClonedProfilesRoot: null,
+  cdpPort: 9222,
   promptDelayMs: 1500,
   draftTimeoutMs: 30000,
   downloadTimeoutMs: 60000,
@@ -308,7 +309,13 @@ export const SettingsPage: React.FC = () => {
   };
 
   const startCreateProfile = () => {
-    setEditingProfile({ name: 'Custom Profile', userDataDir: '', profileDirectory: '', profileDir: '' });
+    setEditingProfile({
+      id: 'custom-profile',
+      name: 'Custom Profile',
+      userDataDir: '',
+      profileDirectory: '',
+      profileDir: '',
+    });
   };
 
   useEffect(() => {

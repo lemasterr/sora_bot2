@@ -7,16 +7,13 @@
     "strict": true,
     "jsx": "react-jsx",
     "esModuleInterop": true,
+    "resolveJsonModule": true,
     "skipLibCheck": true,
     "forceConsistentCasingInFileNames": true,
     "baseUrl": "./",
     "types": ["node"],
     "allowSyntheticDefaultImports": true
   },
-  "include": ["electron", "src", "shared", "vite.config.ts"],
-  "references": [
-    {
-      "path": "./tsconfig.electron.json"
-    }
-  ]
+  "include": ["electron", "src", "shared", "core", "platform", "config", "vite.config.ts"],
+  "exclude": ["dist-electron"]
 }

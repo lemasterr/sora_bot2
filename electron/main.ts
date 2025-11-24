@@ -16,16 +16,18 @@ import { extractPreviewFrames, pickSmartPreviewFrames } from './video/ffmpegWate
 import { blurVideoWithProfile, listBlurProfiles, saveBlurProfile, deleteBlurProfile } from './video/ffmpegBlur';
 import { testTelegram, sendTelegramMessage } from './integrations/telegram';
 import { loggerEvents, logError } from './logging/logger';
+import { clearLogFile, ensureLogDestination, logInfo } from '../core/utils/log';
+import { pages } from '../core/config/pages';
 import { getDailyStats, getTopSessions } from './logging/history';
 import { getLastSelectorForSession, startInspectorForSession } from './automation/selectorInspector';
 import { runCleanupNow, scheduleDailyCleanup } from './maintenance/cleanup';
-import { readProfileFiles, saveProfileFiles } from './content/profileFiles';
+import { openProfileFolder, readProfileFiles, saveProfileFiles } from './content/profileFiles';
 import { sessionLogBroker } from './sessionLogs';
 import { launchBrowserForSession } from './chrome/cdp';
 import { shutdownAllChrome } from './chrome/manager';
 import { resolveSessionCdpPort } from './utils/ports';
 import type { Session } from './sessions/types';
-import type { SessionCommandAction } from '../shared/types';
+import type { SessionCommandAction, WorkflowClientStep } from '../shared/types';
 import type { Browser } from 'puppeteer-core';
 
 let mainWindow: BrowserWindow | null = null;
@@ -90,27 +92,27 @@ async function getOrLaunchManualBrowser(session: Session): Promise<Browser> {
   return browser;
 }
 
-console.log('[main] starting, NODE_ENV=', process.env.NODE_ENV);
+logInfo(`[main] starting, NODE_ENV=${process.env.NODE_ENV}`);
 
 app.whenReady()
   .then(() => {
-    console.log('[main] app is ready, creating window');
+    logInfo('[main] app is ready, creating window');
     createMainWindow();
   })
   .then(() => {
     scheduleDailyCleanup();
-    console.log('[main] daily cleanup scheduled');
+    logInfo('[main] daily cleanup scheduled');
   });
 
 app.on('window-all-closed', () => {
-  console.log('[main] window-all-closed');
+  logInfo('[main] window-all-closed');
   if (process.platform !== 'darwin') {
     app.quit();
   }
 });
 
 app.on('before-quit', async () => {
-  console.log('[main] before-quit');
+  logInfo('[main] before-quit');
   for (const browser of manualBrowsers.values()) {
     try {
       browser.close();
@@ -244,6 +246,7 @@ handle('files:read', async (profileName?: string | null) => {
   return { ok: true, files };
 });
 handle('files:save', async (profileName: string | null, files) => saveProfileFiles(profileName, files));
+handle('files:openFolder', async (profileName?: string | null) => openProfileFolder(profileName));
 handle('sessions:runPrompts', async (id: string) => {
   const session = await getSession(id);
   if (!session) return { ok: false, error: 'Session not found' };
@@ -276,7 +279,7 @@ handle('downloader:openDrafts', async (sessionKey: string) => {
   try {
     const browser = await getOrLaunchManualBrowser(session as Session);
     const page = await browser.newPage();
-    await page.goto('https://sora.chatgpt.com/drafts', { waitUntil: 'networkidle2' });
+    await page.goto(pages.draftsUrl, { waitUntil: 'networkidle2' });
     return { ok: true, details: 'Drafts page opened' };
   } catch (error) {
     const message = (error as Error).message || 'Failed to open drafts';
@@ -291,7 +294,7 @@ handle('downloader:scanDrafts', async (sessionKey: string) => {
   try {
     const browser = await getOrLaunchManualBrowser(session as Session);
     const page = await browser.newPage();
-    await page.goto('https://sora.chatgpt.com/drafts', { waitUntil: 'networkidle2' });
+    await page.goto(pages.draftsUrl, { waitUntil: 'networkidle2' });
     const cards = await page.$$('.sora-draft-card');
     return { ok: true, draftsFound: cards.length };
   } catch (error) {
@@ -308,14 +311,15 @@ handle('downloader:downloadAll', async (sessionKey: string, options?: { limit?: 
 });
 
 handle('pipeline:run', async (steps) => {
-  const safeSteps = Array.isArray(steps)
+  const safeSteps: WorkflowClientStep[] = Array.isArray(steps)
     ? steps.map((step) => ({
-        type: step?.type,
-        sessionIds: Array.isArray(step?.sessionIds) ? step.sessionIds : [],
-        limit: typeof step?.limit === 'number' ? step.limit : undefined,
-        group: typeof step?.group === 'string' ? step.group : undefined,
+        id: step?.id,
+        label: step?.label,
+        enabled: step?.enabled !== false,
+        dependsOn: Array.isArray(step?.dependsOn) ? step.dependsOn : undefined,
       }))
     : [];
+
   await runPipeline(safeSteps, (status) => mainWindow?.webContents.send('pipeline:progress', status));
   return { ok: true };
 });
@@ -374,7 +378,29 @@ handle('logging:rendererError', async (payload) => {
 });
 
 handle('system:openPath', async (target: string) => shell.openPath(target));
-handle('system:openLogs', async () => shell.openPath(path.join(app.getPath('userData'), 'logs')));
+handle('logging:info', async () => {
+  const { dir, file } = ensureLogDestination();
+  if (!dir || !file) {
+    return { ok: false, error: 'No writable log destination available.' };
+  }
+  return { ok: true, dir, file };
+});
+
+handle('logging:clear', async () => {
+  const result = clearLogFile();
+  if (!result.ok) return result;
+  logInfo('[logging] log file cleared by user');
+  return result;
+});
+
+handle('system:openLogs', async () => {
+  const { dir } = ensureLogDestination();
+  if (!dir) {
+    return { ok: false, error: 'No writable log directory available.' };
+  }
+  await shell.openPath(dir);
+  return { ok: true, dir };
+});
 
 // legacy
 handle('ping', async () => 'pong');

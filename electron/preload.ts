@@ -1,11 +1,12 @@
 import { contextBridge, ipcRenderer } from 'electron';
 import type { SessionCommandAction } from '../shared/types';
+import { logError } from '../core/utils/log';
 
 const safeInvoke = async (channel: string, ...args: unknown[]) => {
   try {
     return await ipcRenderer.invoke(channel, ...args);
   } catch (error) {
-    console.error('IPC invoke failed', channel, error);
+    logError(`IPC invoke failed for ${channel}`, error);
     return { ok: false, error: (error as Error)?.message || 'IPC failed' };
   }
 };
@@ -58,10 +59,12 @@ contextBridge.exposeInMainWorld('electronAPI', {
   files: {
     read: (profileName?: string | null): Promise<unknown> => safeInvoke('files:read', profileName ?? null),
     save: (profileName: string | null, files: unknown): Promise<unknown> => safeInvoke('files:save', profileName, files),
+    openFolder: (profileName?: string | null): Promise<unknown> => safeInvoke('files:openFolder', profileName ?? null),
   },
   sessionFiles: {
     read: (profileName?: string | null): Promise<unknown> => safeInvoke('files:read', profileName ?? null),
     save: (profileName: string | null, files: unknown): Promise<unknown> => safeInvoke('files:save', profileName, files),
+    openFolder: (profileName?: string | null): Promise<unknown> => safeInvoke('files:openFolder', profileName ?? null),
   },
   autogen: {
     run: (sessionId: string): Promise<unknown> => safeInvoke('autogen:run', sessionId),
@@ -101,6 +104,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
       };
     },
     export: (): Promise<unknown> => safeInvoke('system:openLogs'),
+    info: (): Promise<unknown> => safeInvoke('logging:info'),
+    clear: (): Promise<unknown> => safeInvoke('logging:clear'),
   },
   qa: {
     batchRun: (videoDir?: string): Promise<unknown> => safeInvoke('qa:batchRun', videoDir),

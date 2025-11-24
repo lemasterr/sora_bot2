@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import type { ManagedSession, SessionLogEntry } from '../shared/types';
+import type { ManagedSession, SessionLogEntry } from '../../shared/types';
 
 interface SessionWindowProps {
   session: ManagedSession;
