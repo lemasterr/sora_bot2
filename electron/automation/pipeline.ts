@@ -28,17 +28,23 @@ function emitProgress(onProgress: (status: WorkflowProgress) => void, progress: 
   }
 }
 
-function parseDownloadIndex(stepId: WorkflowStepId): number | null {
-  const match = typeof stepId === 'string' ? stepId.match(/^downloadSession(\d+)$/) : null;
-  return match ? Number(match[1]) - 1 : null;
-}
-
 function toSession(managed: ManagedSession): Session {
   const { status: _status, promptCount: _promptCount, titleCount: _titleCount, hasFiles: _hasFiles, ...rest } = managed;
   return rest;
 }
 
-async function runDownloadForSession(session: Session): Promise<{ message?: string; downloadedCount?: number }> {
+function ensureUniqueCdpPorts(sessions: Session[]): void {
+  const seen = new Set<number>();
+  for (const session of sessions) {
+    const port = session.cdpPort ?? undefined;
+    if (!port || !Number.isFinite(port)) continue;
+    if (seen.has(port)) {
+      throw new Error(`Duplicate CDP port detected across sessions: ${port}`);
+    }
+    seen.add(port);
+  }
+}
+async function runDownloadForSession(session: Session): Promise<{ message: string; downloadedCount: number }> {
   const limit = Number.isFinite(session.maxVideos) && session.maxVideos > 0 ? session.maxVideos : 0;
   const result = await runDownloads(session, limit ?? 0);
   if (!result.ok) {
@@ -46,7 +52,8 @@ async function runDownloadForSession(session: Session): Promise<{ message?: stri
   }
 
   const downloaded = typeof result.downloaded === 'number' ? result.downloaded : 0;
-  return { message: `Downloaded ${downloaded}`, downloadedCount: downloaded };
+  const label = session.name || session.id;
+  return { message: `Downloaded ${downloaded} for ${label}`, downloadedCount: downloaded };
 }
 
 async function runBlurVideos(targetSessions: Session[]): Promise<void> {
@@ -142,16 +149,18 @@ function buildWorkflowSteps(
   allSessions: Session[]
 ): WorkflowStep[] {
   const targetSessions = activeSessionIds.length > 0 ? activeSessionIds : Array.from(sessionLookup.keys());
-  const sessionOrder = allSessions;
 
   const resolveSessionForDownload = (step: WorkflowClientStep): Session => {
     if (step.sessionId && sessionLookup.has(step.sessionId)) {
       return sessionLookup.get(step.sessionId)!;
     }
 
-    const index = parseDownloadIndex(step.id);
-    if (index !== null && sessionOrder[index]) {
-      return sessionOrder[index];
+    const fallbackIndexMatch = typeof step.id === 'string' ? step.id.match(/^downloadSession(\d+)$/) : null;
+    if (fallbackIndexMatch) {
+      const index = Number(fallbackIndexMatch[1]) - 1;
+      if (Number.isInteger(index) && allSessions[index]) {
+        return allSessions[index];
+      }
     }
 
     throw new Error(`Session for ${step.id} is not available`);
@@ -225,6 +234,20 @@ export async function runPipeline(
   const sessionList = managedSessions.map((managed) => toSession(managed));
   const sessionLookup = new Map(sessionList.map((session) => [session.id, session]));
 
+  try {
+    ensureUniqueCdpPorts(sessionList);
+  } catch (error) {
+    const message = (error as Error).message;
+    emitProgress(onProgress, {
+      stepId: 'workflow',
+      label: 'Workflow',
+      status: 'error',
+      message,
+      timestamp: Date.now(),
+    });
+    return;
+  }
+
   const { normalized, activeSessionIds } = normalizeClientSteps(steps, managedSessions);
 
   emitProgress(onProgress, {
@@ -235,22 +258,32 @@ export async function runPipeline(
     timestamp: Date.now(),
   });
 
-  const workflowSteps = buildWorkflowSteps(normalized, sessionLookup, activeSessionIds, sessionList);
-  const results = await runWorkflow(workflowSteps, {
-    onProgress: (event) => emitProgress(onProgress, { ...event, stepId: event.stepId as WorkflowStepId }),
-    logger: (msg) => logInfo('Pipeline', msg),
-    shouldCancel: () => cancelled,
-  });
+  try {
+    const workflowSteps = buildWorkflowSteps(normalized, sessionLookup, activeSessionIds, sessionList);
+    const results = await runWorkflow(workflowSteps, {
+      onProgress: (event) => emitProgress(onProgress, { ...event, stepId: event.stepId as WorkflowStepId }),
+      logger: (msg) => logInfo('Pipeline', msg),
+      shouldCancel: () => cancelled,
+    });
 
-  const hadError = results.some((result) => result.status === 'error');
-  const finalStatus = cancelled || hadError ? 'error' : 'success';
-  emitProgress(onProgress, {
-    stepId: 'workflow',
-    label: 'Workflow',
-    status: finalStatus,
-    message: cancelled ? 'Workflow cancelled' : hadError ? 'Workflow finished with errors' : 'Workflow complete',
-    timestamp: Date.now(),
-  });
+    const hadError = results.some((result) => result.status === 'error');
+    const finalStatus = cancelled || hadError ? 'error' : 'success';
+    emitProgress(onProgress, {
+      stepId: 'workflow',
+      label: 'Workflow',
+      status: finalStatus,
+      message: cancelled ? 'Workflow cancelled' : hadError ? 'Workflow finished with errors' : 'Workflow complete',
+      timestamp: Date.now(),
+    });
+  } catch (error) {
+    emitProgress(onProgress, {
+      stepId: 'workflow',
+      label: 'Workflow',
+      status: 'error',
+      message: (error as Error).message,
+      timestamp: Date.now(),
+    });
+  }
 }
 
 export function cancelPipeline(): void {

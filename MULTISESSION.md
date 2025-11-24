@@ -1,35 +1,24 @@
-# Multi-session download manager
+# Multi-session downloads
 
-The multi-session manager coordinates sequential Chrome launches for multiple
-profiles and runs the shared download flow for each one. It centralizes CDP
-port validation, profile resolution, Chrome startup, and teardown.
+The application now coordinates multiple Chrome sessions entirely through the
+workflow pipeline. Each download step is generated dynamically for the selected
+sessions and runs sequentially with isolated Chrome instances and CDP ports.
 
 ## How it works
-1. Validate that every session configuration has a unique `cdpPort`.
-2. Resolve the profile path for `profileId` via the unified profile scanner.
-3. Launch Chrome with the centralized launcher, then wait for CDP readiness.
-4. Connect over CDP to allow the caller to prepare a page for automation.
-5. Run the provided download flow with a configured max download count.
-6. Close the Puppeteer connection and terminate the Chrome PID before moving
-   to the next session.
-
-## API
-`runMultiSessionDownload(sessions, flows)` takes:
-- `sessions`: array of `{ sessionId, profileId, cdpPort, maxDownloads }`.
-- `flows.createPage(cdpPort)`: returns a prepared Puppeteer `Page` connected
-  to the session’s Chrome instance on `cdpPort`.
-- `flows.downloadFlow`: typically the shared `runDownloadLoop` from
-  `core/download/downloadFlow`.
-- `flows.downloadOptions`: base options for the download loop (selectors,
-  download directory, swipe handler) excluding `page` and `maxDownloads`.
-
-The function returns an array of `{ sessionId, profilePath, completed, result?,
-error? }` per session.
+1. The renderer lets you choose which sessions participate; the workflow builder
+   (`buildDynamicWorkflow`) creates `downloadSession<N>` steps for each
+   selection.
+2. Each download step resolves its session object (id, profile, CDP port,
+   limits) and invokes `runDownloadForSession` inside `electron/automation/pipeline.ts`.
+3. `runDownloadForSession` delegates to `runDownloads`, which launches or
+   reuses a Chrome clone for that session via `ensureBrowserForSession`, runs
+   the shared download loop, and reports the number of files saved.
+4. Workflow progress events carry `sessionId` and `downloadedCount` so the UI
+   can display per-session status, errors, and totals.
 
 ## Notes
-- Chrome is always launched through `launchChromeWithCDP`, so no other manual
-  spawns should be used for multi-session runs.
-- CDP connections are cleaned up even on errors, and the Chrome PID is killed
-  after each session finishes.
-- Adjust `downloadOptions` to point at the correct download directory and
-  selectors for your environment before invoking the manager.
+- There is no separate multi-session runner; the workflow pipeline orchestrates
+  open → download → post-processing across any number of sessions.
+- Each session uses its own Chrome clone and CDP port, preventing collisions.
+- If a step fails, the workflow logs the error but continues to the next step
+  so other sessions can finish.
