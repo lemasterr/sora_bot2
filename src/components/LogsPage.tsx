@@ -16,6 +16,7 @@ export function LogsPage() {
   const [exportMessage, setExportMessage] = useState<string>('');
   const logRef = useRef<HTMLDivElement>(null);
   const [apiError, setApiError] = useState<string | null>(null);
+  const [logLocation, setLogLocation] = useState<string>('');
 
   useEffect(() => {
     const api = (window as any).electronAPI;
@@ -24,6 +25,17 @@ export function LogsPage() {
       setApiError('Logging API is not available. Please run the Sora desktop app.');
       return;
     }
+
+    logsApi
+      .info()
+      .then((result: any) => {
+        if (result?.ok && result.dir) {
+          setLogLocation(result.file || result.dir);
+        }
+      })
+      .catch(() => {
+        // non-fatal: UI will simply hide location text
+      });
 
     const unsubscribe = logsApi.subscribe((entry: AppLogEntry) => {
       setLogs((prev) => [...prev.slice(-900), entry]);
@@ -82,6 +94,7 @@ export function LogsPage() {
         <div>
           <h2 className="text-xl font-semibold text-white">Activity Logs</h2>
           <p className="text-sm text-zinc-400">Global stream across Chrome, automation, downloads, and pipelines.</p>
+          {logLocation && <p className="text-xs text-zinc-500">Location: {logLocation}</p>}
         </div>
         <div className="flex items-center gap-3">
           <div className="flex items-center gap-2 text-xs text-zinc-300">

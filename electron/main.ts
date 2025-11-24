@@ -16,7 +16,7 @@ import { extractPreviewFrames, pickSmartPreviewFrames } from './video/ffmpegWate
 import { blurVideoWithProfile, listBlurProfiles, saveBlurProfile, deleteBlurProfile } from './video/ffmpegBlur';
 import { testTelegram, sendTelegramMessage } from './integrations/telegram';
 import { loggerEvents, logError } from './logging/logger';
-import { logInfo } from '../core/utils/log';
+import { ensureLogDestination, logInfo } from '../core/utils/log';
 import { pages } from '../core/config/pages';
 import { getDailyStats, getTopSessions } from './logging/history';
 import { getLastSelectorForSession, startInspectorForSession } from './automation/selectorInspector';
@@ -378,7 +378,22 @@ handle('logging:rendererError', async (payload) => {
 });
 
 handle('system:openPath', async (target: string) => shell.openPath(target));
-handle('system:openLogs', async () => shell.openPath(path.join(app.getPath('userData'), 'logs')));
+handle('logging:info', async () => {
+  const { dir, file } = ensureLogDestination();
+  if (!dir || !file) {
+    return { ok: false, error: 'No writable log destination available.' };
+  }
+  return { ok: true, dir, file };
+});
+
+handle('system:openLogs', async () => {
+  const { dir } = ensureLogDestination();
+  if (!dir) {
+    return { ok: false, error: 'No writable log directory available.' };
+  }
+  await shell.openPath(dir);
+  return { ok: true, dir };
+});
 
 // legacy
 handle('ping', async () => 'pong');

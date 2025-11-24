@@ -78,3 +78,8 @@ export function logStep(message: string) {
 export function getResolvedLogPath() {
   return { dir: resolvedLogDir, file: resolvedLogFile };
 }
+
+export function ensureLogDestination() {
+  prepareLogFile();
+  return { dir: resolvedLogDir, file: resolvedLogFile };
+}
