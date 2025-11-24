@@ -2,18 +2,17 @@
 
 The workflow system orchestrates a small, ordered set of automation steps. It is built on top of the shared runner in `core/workflow/workflow.ts` and exposed to the app through the IPC pipeline channel.
 
-## Standard steps
+## Dynamic steps
 
-| ID                | Label                   | Depends on            | Purpose                                        |
-| ----------------- | ----------------------- | --------------------- | ---------------------------------------------- |
-| openSessions      | Open all sessions       | —                     | Launches Chrome for each configured session.   |
-| downloadSession1  | Download (Session 1)    | openSessions          | Runs the downloader for the first session.     |
-| downloadSession2  | Download (Session 2)    | openSessions          | Runs the downloader for the second session.    |
-| blurVideos        | Blur videos             | downloadSession1/2    | Applies blur profiles to cleaned/blurred dirs. |
-| mergeVideos       | Merge videos            | blurVideos            | Merges blurred videos into a single file.      |
-| cleanMetadata     | Clean metadata          | mergeVideos           | Strips metadata from the clean directory.      |
+Steps are generated per-session via `buildDynamicWorkflow` in `shared/types.ts`:
 
-The default list is exported as `DEFAULT_WORKFLOW_STEPS` from `shared/types.ts` for both renderer and main process usage.
+| ID pattern              | Label example             | Depends on         | Purpose                                        |
+| ----------------------- | ------------------------- | ------------------ | ---------------------------------------------- |
+| openSessions            | Open all sessions         | —                  | Launches Chrome for each selected session.     |
+| downloadSession<N>      | Download (Session Name)   | openSessions       | Runs the downloader for the Nth selected slot. |
+| blurVideos              | Blur videos               | all download steps | Applies blur profiles to cleaned/blurred dirs. |
+| mergeVideos             | Merge videos              | blurVideos         | Merges blurred videos into a single file.      |
+| cleanMetadata           | Clean metadata            | mergeVideos        | Strips metadata from the clean directory.      |
 
 ## Runner
 

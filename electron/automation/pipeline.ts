@@ -1,8 +1,8 @@
 import path from 'path';
 
-import { STANDARD_WORKFLOW_ORDER, runWorkflow, type WorkflowStep } from '../../core/workflow/workflow';
+import { runWorkflow, type WorkflowStep } from '../../core/workflow/workflow';
 import {
-  DEFAULT_WORKFLOW_STEPS,
+  buildDynamicWorkflow,
   type ManagedSession,
   type WorkflowClientStep,
   type WorkflowProgress,
@@ -28,32 +28,29 @@ function emitProgress(onProgress: (status: WorkflowProgress) => void, progress: 
   }
 }
 
+function parseDownloadIndex(stepId: WorkflowStepId): number | null {
+  const match = typeof stepId === 'string' ? stepId.match(/^downloadSession(\d+)$/) : null;
+  return match ? Number(match[1]) - 1 : null;
+}
+
 function toSession(managed: ManagedSession): Session {
   const { status: _status, promptCount: _promptCount, titleCount: _titleCount, hasFiles: _hasFiles, ...rest } = managed;
   return rest;
 }
 
-async function pickSession(index: number): Promise<Session> {
-  const sessions = await listSessions();
-  if (!sessions[index]) {
-    throw new Error(`Session ${index + 1} is not configured`);
-  }
-  return toSession(sessions[index]);
-}
-
-async function runDownloadForIndex(index: number): Promise<void> {
-  const session = await pickSession(index);
+async function runDownloadForSession(session: Session): Promise<{ message?: string; downloadedCount?: number }> {
   const limit = Number.isFinite(session.maxVideos) && session.maxVideos > 0 ? session.maxVideos : 0;
   const result = await runDownloads(session, limit ?? 0);
   if (!result.ok) {
     throw new Error(result.error ?? 'Download failed');
   }
+
+  const downloaded = typeof result.downloaded === 'number' ? result.downloaded : 0;
+  return { message: `Downloaded ${downloaded}`, downloadedCount: downloaded };
 }
 
-async function runBlurVideos(): Promise<void> {
-  const sessions = await listSessions();
-  for (const managed of sessions) {
-    const session = toSession(managed);
+async function runBlurVideos(targetSessions: Session[]): Promise<void> {
+  for (const session of targetSessions) {
     const paths = await getSessionPaths(session);
     const sourceDir = paths.cleanDir || paths.downloadDir;
     const targetDir = path.join(paths.cleanDir, 'blurred');
@@ -61,10 +58,8 @@ async function runBlurVideos(): Promise<void> {
   }
 }
 
-async function runMergeVideos(): Promise<void> {
-  const sessions = await listSessions();
-  for (const managed of sessions) {
-    const session = toSession(managed);
+async function runMergeVideos(targetSessions: Session[]): Promise<void> {
+  for (const session of targetSessions) {
     const paths = await getSessionPaths(session);
     const sourceDir = path.join(paths.cleanDir, 'blurred');
     const outputFile = path.join(paths.cleanDir, 'merged.mp4');
@@ -72,90 +67,153 @@ async function runMergeVideos(): Promise<void> {
   }
 }
 
-async function runCleanMetadata(): Promise<void> {
-  const sessions = await listSessions();
-  for (const managed of sessions) {
-    const session = toSession(managed);
+async function runCleanMetadata(targetSessions: Session[]): Promise<void> {
+  for (const session of targetSessions) {
     const paths = await getSessionPaths(session);
     await stripMetadataInDir(paths.cleanDir);
   }
 }
 
-async function runOpenSessions(): Promise<void> {
-  const sessions = await listSessions();
-  for (const managed of sessions) {
-    const session = toSession(managed);
+async function runOpenSessions(targetSessions: Session[]): Promise<void> {
+  for (const session of targetSessions) {
     await ensureBrowserForSession(session);
   }
 }
 
-async function runStandardStep(stepId: WorkflowStepId): Promise<void> {
-  switch (stepId) {
-    case 'openSessions':
-      await runOpenSessions();
-      return;
-    case 'downloadSession1':
-      await runDownloadForIndex(0);
-      return;
-    case 'downloadSession2':
-      await runDownloadForIndex(1);
-      return;
-    case 'blurVideos':
-      await runBlurVideos();
-      return;
-    case 'mergeVideos':
-      await runMergeVideos();
-      return;
-    case 'cleanMetadata':
-      await runCleanMetadata();
-      return;
-    default:
-      throw new Error(`Unknown workflow step: ${stepId}`);
+function normalizeClientSteps(
+  steps: unknown,
+  availableSessions: ManagedSession[],
+  selectedSessionIds?: string[]
+): { normalized: WorkflowClientStep[]; activeSessionIds: string[] } {
+  const defaultSteps = buildDynamicWorkflow(availableSessions, selectedSessionIds);
+  const allowedIds = new Set<WorkflowStepId>(defaultSteps.map((step) => step.id));
+  const defaultsById = new Map<WorkflowStepId, WorkflowClientStep>(defaultSteps.map((step) => [step.id, step]));
+  const validSessionIds = new Set(availableSessions.map((session) => session.id));
+
+  if (!Array.isArray(steps)) {
+    const active = defaultSteps.filter((step) => step.id.toString().startsWith('downloadSession') && step.sessionId?.length);
+    return { normalized: defaultSteps, activeSessionIds: active.map((step) => step.sessionId!).filter(Boolean) };
   }
+
+  const normalized: WorkflowClientStep[] = [];
+
+  for (const raw of steps as WorkflowClientStep[]) {
+    const id = raw?.id as WorkflowStepId;
+    if (!id || (!allowedIds.has(id) && !/^downloadSession\d+$/.test(String(id)))) {
+      continue;
+    }
+
+    const fallback = defaultsById.get(id);
+    const dependsOn = Array.isArray(raw?.dependsOn)
+      ? (raw.dependsOn as WorkflowStepId[]).filter((dep) => allowedIds.has(dep) || /^downloadSession\d+$/.test(String(dep)))
+      : fallback?.dependsOn;
+
+    const sessionId = raw?.sessionId ?? fallback?.sessionId;
+    const cleanSessionId = sessionId && validSessionIds.has(sessionId) ? sessionId : undefined;
+
+    normalized.push({
+      id,
+      label:
+        typeof raw?.label === 'string' && raw.label.length > 0
+          ? raw.label
+          : fallback?.label || (typeof id === 'string' ? id : ''),
+      enabled: raw?.enabled !== false,
+      dependsOn,
+      sessionId: cleanSessionId,
+    });
+  }
+
+  const stepsToUse = normalized.length > 0 ? normalized : defaultSteps;
+  const activeSessionIds = Array.from(
+    new Set(
+      stepsToUse
+        .filter((step) => typeof step.id === 'string' && String(step.id).startsWith('downloadSession') && step.sessionId)
+        .map((step) => step.sessionId!)
+    )
+  );
+
+  return { normalized: stepsToUse, activeSessionIds };
 }
 
-function normalizeClientSteps(steps: unknown): WorkflowClientStep[] {
-  if (!Array.isArray(steps)) return DEFAULT_WORKFLOW_STEPS;
-  const defaults = new Map<WorkflowStepId, WorkflowClientStep>(DEFAULT_WORKFLOW_STEPS.map((s) => [s.id, s]));
-  const allowed = new Set<WorkflowStepId>(defaults.keys());
+function buildWorkflowSteps(
+  selection: WorkflowClientStep[],
+  sessionLookup: Map<string, Session>,
+  activeSessionIds: string[],
+  allSessions: Session[]
+): WorkflowStep[] {
+  const targetSessions = activeSessionIds.length > 0 ? activeSessionIds : Array.from(sessionLookup.keys());
+  const sessionOrder = allSessions;
 
-  const normalized: WorkflowClientStep[] = steps
-    .map((step) => {
-      const base = defaults.get(step?.id as WorkflowStepId);
+  const resolveSessionForDownload = (step: WorkflowClientStep): Session => {
+    if (step.sessionId && sessionLookup.has(step.sessionId)) {
+      return sessionLookup.get(step.sessionId)!;
+    }
+
+    const index = parseDownloadIndex(step.id);
+    if (index !== null && sessionOrder[index]) {
+      return sessionOrder[index];
+    }
+
+    throw new Error(`Session for ${step.id} is not available`);
+  };
+
+  return selection.map((step) => {
+    if (step.id === 'openSessions') {
       return {
-        id: step?.id as WorkflowStepId,
-        label:
-          typeof step?.label === 'string' && step.label.length > 0
-            ? step.label
-            : base?.label || (typeof step?.id === 'string' ? (step.id as string) : ''),
-        enabled: step?.enabled !== false,
-        dependsOn: Array.isArray(step?.dependsOn)
-          ? (step.dependsOn as WorkflowStepId[])
-          : base?.dependsOn,
-      };
-    })
-    .filter((step) => allowed.has(step.id));
+        id: step.id,
+        label: step.label,
+        enabled: step.enabled,
+        dependsOn: step.dependsOn,
+        run: () => runOpenSessions(targetSessions.map((id) => sessionLookup.get(id)).filter(Boolean) as Session[]),
+      } satisfies WorkflowStep;
+    }
 
-  return normalized.length > 0 ? normalized : DEFAULT_WORKFLOW_STEPS;
-}
+    if (typeof step.id === 'string' && step.id.startsWith('downloadSession')) {
+      return {
+        id: step.id,
+        label: step.label,
+        enabled: step.enabled,
+        dependsOn: step.dependsOn,
+        run: async () => {
+          const session = resolveSessionForDownload(step);
+          return runDownloadForSession(session);
+        },
+        sessionId: step.sessionId ?? resolveSessionForDownload(step).id,
+      } satisfies WorkflowStep;
+    }
 
-function buildWorkflowSteps(selection: WorkflowClientStep[]): WorkflowStep[] {
-  const defaults = new Map<WorkflowStepId, WorkflowClientStep>(DEFAULT_WORKFLOW_STEPS.map((s) => [s.id, s]));
+    if (step.id === 'blurVideos') {
+      return {
+        id: step.id,
+        label: step.label,
+        enabled: step.enabled,
+        dependsOn: step.dependsOn,
+        run: () => runBlurVideos(targetSessions.map((id) => sessionLookup.get(id)).filter(Boolean) as Session[]),
+      } satisfies WorkflowStep;
+    }
 
-  return STANDARD_WORKFLOW_ORDER.map((id) => {
-    const stepId = id as WorkflowStepId;
-    const preferred = selection.find((s) => s.id === stepId) ?? defaults.get(stepId);
-    if (!preferred) return null;
+    if (step.id === 'mergeVideos') {
+      return {
+        id: step.id,
+        label: step.label,
+        enabled: step.enabled,
+        dependsOn: step.dependsOn,
+        run: () => runMergeVideos(targetSessions.map((id) => sessionLookup.get(id)).filter(Boolean) as Session[]),
+      } satisfies WorkflowStep;
+    }
 
-    const fallback = defaults.get(stepId);
-    return {
-      id: stepId,
-      label: preferred.label || fallback?.label || stepId,
-      enabled: preferred.enabled ?? true,
-      dependsOn: preferred.dependsOn ?? fallback?.dependsOn,
-      run: () => runStandardStep(stepId),
-    } satisfies WorkflowStep;
-  }).filter(Boolean) as WorkflowStep[];
+    if (step.id === 'cleanMetadata') {
+      return {
+        id: step.id,
+        label: step.label,
+        enabled: step.enabled,
+        dependsOn: step.dependsOn,
+        run: () => runCleanMetadata(targetSessions.map((id) => sessionLookup.get(id)).filter(Boolean) as Session[]),
+      } satisfies WorkflowStep;
+    }
+
+    throw new Error(`Unknown workflow step: ${String(step.id)}`);
+  });
 }
 
 export async function runPipeline(
@@ -163,11 +221,21 @@ export async function runPipeline(
   onProgress: (status: WorkflowProgress) => void
 ): Promise<void> {
   cancelled = false;
-  const normalized = normalizeClientSteps(steps);
+  const managedSessions = await listSessions();
+  const sessionList = managedSessions.map((managed) => toSession(managed));
+  const sessionLookup = new Map(sessionList.map((session) => [session.id, session]));
 
-  emitProgress(onProgress, { stepId: 'workflow', label: 'Workflow', status: 'running', message: 'Workflow starting', timestamp: Date.now() });
+  const { normalized, activeSessionIds } = normalizeClientSteps(steps, managedSessions);
 
-  const workflowSteps = buildWorkflowSteps(normalized);
+  emitProgress(onProgress, {
+    stepId: 'workflow',
+    label: 'Workflow',
+    status: 'running',
+    message: 'Workflow starting',
+    timestamp: Date.now(),
+  });
+
+  const workflowSteps = buildWorkflowSteps(normalized, sessionLookup, activeSessionIds, sessionList);
   const results = await runWorkflow(workflowSteps, {
     onProgress: (event) => emitProgress(onProgress, { ...event, stepId: event.stepId as WorkflowStepId }),
     logger: (msg) => logInfo('Pipeline', msg),

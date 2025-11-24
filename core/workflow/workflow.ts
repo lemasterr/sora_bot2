@@ -5,8 +5,9 @@ export interface WorkflowStep {
   id: string;
   label: string;
   enabled: boolean;
-  run: () => Promise<void>;
+  run: () => Promise<void | { message?: string; downloadedCount?: number }>;
   dependsOn?: string[];
+  sessionId?: string;
 }
 
 export type WorkflowRunStatus = 'running' | 'success' | 'error' | 'skipped';
@@ -17,6 +18,8 @@ export interface WorkflowProgressEvent {
   status: WorkflowRunStatus;
   message: string;
   timestamp: number;
+  sessionId?: string;
+  downloadedCount?: number;
 }
 
 export interface WorkflowRunResult {
@@ -34,10 +37,11 @@ export interface WorkflowRunOptions {
 }
 
 function emitProgress(
-  step: Pick<WorkflowStep, 'id' | 'label'>,
+  step: Pick<WorkflowStep, 'id' | 'label' | 'sessionId'>,
   status: WorkflowRunStatus,
   message: string,
-  options: WorkflowRunOptions
+  options: WorkflowRunOptions,
+  downloadedCount?: number
 ): void {
   options.logger?.(`[workflow] ${step.label}: ${message}`);
   options.onProgress?.({
@@ -46,6 +50,8 @@ function emitProgress(
     status,
     message,
     timestamp: Date.now(),
+    sessionId: step.sessionId,
+    downloadedCount,
   });
 }
 
@@ -86,11 +92,20 @@ export async function runWorkflow(
     logStep(`Workflow step start: ${step.label}`);
 
     try {
-      await step.run();
+      const result = await step.run();
+      const downloadedCount = typeof result === 'object' && result?.downloadedCount !== undefined
+        ? result.downloadedCount
+        : undefined;
+      const customMessage =
+        typeof result === 'string'
+          ? result
+          : typeof result === 'object' && result?.message
+            ? result.message
+            : undefined;
       const durationMs = Math.round(performance.now() - start);
       statusById.set(step.id, 'success');
       results.push({ stepId: step.id, label: step.label, status: 'success', durationMs });
-      emitProgress(step, 'success', `Finished in ${durationMs} ms`, options);
+      emitProgress(step, 'success', customMessage ?? `Finished in ${durationMs} ms`, options, downloadedCount);
       logStep(`Workflow step success: ${step.label} in ${durationMs} ms`);
     } catch (error) {
       const durationMs = Math.round(performance.now() - start);
@@ -105,11 +120,3 @@ export async function runWorkflow(
   return results;
 }
 
-export const STANDARD_WORKFLOW_ORDER = [
-  'openSessions',
-  'downloadSession1',
-  'downloadSession2',
-  'blurVideos',
-  'mergeVideos',
-  'cleanMetadata',
-];

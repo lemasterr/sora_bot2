@@ -1,14 +1,16 @@
 import { ReactNode, useMemo, useState } from 'react';
 import { useAppStore } from '../store';
-import { DEFAULT_WORKFLOW_STEPS } from '../../shared/types';
+import { buildDynamicWorkflow } from '../../shared/types';
 
 type ShortcutResult = { ok?: boolean; error?: string } | unknown;
 
 export function QuickAccessPanel() {
-  const { quickAccessOpen, closeQuickAccess, config, setCurrentPage } = useAppStore();
+  const { quickAccessOpen, closeQuickAccess, config, setCurrentPage, sessions } = useAppStore();
   const api = useMemo(() => window.electronAPI, []);
   const [busy, setBusy] = useState<string | null>(null);
   const [result, setResult] = useState<string | null>(null);
+
+  const defaultWorkflow = useMemo(() => buildDynamicWorkflow(sessions), [sessions]);
 
   const run = async (label: string, fn?: () => Promise<ShortcutResult>) => {
     if (!fn) return;
@@ -61,7 +63,7 @@ export function QuickAccessPanel() {
             onClick={() =>
               run(
                 'Run Default Pipeline',
-                () => api?.pipeline?.run?.(DEFAULT_WORKFLOW_STEPS) ?? Promise.resolve({ ok: false, error: 'No pipeline' })
+                () => api?.pipeline?.run?.(defaultWorkflow) ?? Promise.resolve({ ok: false, error: 'No pipeline' })
               )
             }
           />

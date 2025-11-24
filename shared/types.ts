@@ -141,10 +141,11 @@ export interface WatermarkCleanResult {
   error?: string;
 }
 
+export type DownloadWorkflowStepId = `downloadSession${number}`;
+
 export type WorkflowStepId =
   | 'openSessions'
-  | 'downloadSession1'
-  | 'downloadSession2'
+  | DownloadWorkflowStepId
   | 'blurVideos'
   | 'mergeVideos'
   | 'cleanMetadata';
@@ -154,6 +155,7 @@ export interface WorkflowClientStep {
   label: string;
   enabled: boolean;
   dependsOn?: WorkflowStepId[];
+  sessionId?: string;
 }
 
 export interface WorkflowProgress {
@@ -162,13 +164,39 @@ export interface WorkflowProgress {
   status: 'running' | 'success' | 'error' | 'skipped';
   message: string;
   timestamp: number;
+  sessionId?: string;
+  downloadedCount?: number;
 }
 
-export const DEFAULT_WORKFLOW_STEPS: WorkflowClientStep[] = [
-  { id: 'openSessions', label: 'Open all sessions', enabled: true },
-  { id: 'downloadSession1', label: 'Download (Session 1)', enabled: true, dependsOn: ['openSessions'] },
-  { id: 'downloadSession2', label: 'Download (Session 2)', enabled: true, dependsOn: ['openSessions'] },
-  { id: 'blurVideos', label: 'Blur videos', enabled: true, dependsOn: ['downloadSession1', 'downloadSession2'] },
-  { id: 'mergeVideos', label: 'Merge videos', enabled: true, dependsOn: ['blurVideos'] },
-  { id: 'cleanMetadata', label: 'Clean metadata', enabled: true, dependsOn: ['mergeVideos'] },
-];
+export function buildDynamicWorkflow(
+  sessions: ManagedSession[],
+  selectedSessionIds?: string[]
+): WorkflowClientStep[] {
+  const selected =
+    selectedSessionIds && selectedSessionIds.length > 0
+      ? sessions.filter((session) => selectedSessionIds.includes(session.id))
+      : sessions;
+
+  const steps: WorkflowClientStep[] = [];
+
+  steps.push({ id: 'openSessions', label: 'Open all sessions', enabled: true });
+
+  const downloadStepIds: DownloadWorkflowStepId[] = [];
+  selected.forEach((session, index) => {
+    const id = `downloadSession${index + 1}` as DownloadWorkflowStepId;
+    downloadStepIds.push(id);
+    steps.push({
+      id,
+      label: `Download (${session.name})`,
+      enabled: true,
+      dependsOn: ['openSessions'],
+      sessionId: session.id,
+    });
+  });
+
+  steps.push({ id: 'blurVideos', label: 'Blur videos', enabled: true, dependsOn: downloadStepIds });
+  steps.push({ id: 'mergeVideos', label: 'Merge videos', enabled: true, dependsOn: ['blurVideos'] });
+  steps.push({ id: 'cleanMetadata', label: 'Clean metadata', enabled: true, dependsOn: ['mergeVideos'] });
+
+  return steps;
+}
