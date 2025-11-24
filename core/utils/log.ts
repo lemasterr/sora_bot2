@@ -1,34 +1,58 @@
 import fs from 'fs';
+import os from 'os';
 import path from 'path';
 
-const LOG_DIR = process.env.SORA_LOG_DIR
-  ? path.resolve(process.env.SORA_LOG_DIR)
-  : path.resolve(process.cwd(), 'logs');
-const LOG_FILE = path.join(LOG_DIR, 'app.log');
+const LOG_DIR_CANDIDATES = [
+  process.env.SORA_LOG_DIR ? path.resolve(process.env.SORA_LOG_DIR) : null,
+  path.resolve(process.cwd(), 'logs'),
+  path.resolve(os.homedir(), '.sora_bot2', 'logs'),
+  path.resolve(os.tmpdir(), 'sora_bot2', 'logs'),
+].filter((entry): entry is string => Boolean(entry));
 
-function ensureLogFile() {
-  try {
-    if (!fs.existsSync(LOG_DIR)) {
-      fs.mkdirSync(LOG_DIR, { recursive: true });
+let resolvedLogFile: string | null = null;
+let resolvedLogDir: string | null = null;
+
+function prepareLogFile(): string | null {
+  if (resolvedLogFile) return resolvedLogFile;
+
+  for (const candidate of LOG_DIR_CANDIDATES) {
+    const filePath = path.join(candidate, 'app.log');
+
+    try {
+      if (!fs.existsSync(candidate)) {
+        fs.mkdirSync(candidate, { recursive: true });
+      }
+      fs.appendFileSync(filePath, '', { encoding: 'utf-8' });
+
+      resolvedLogDir = candidate;
+      resolvedLogFile = filePath;
+      return resolvedLogFile;
+    } catch (error) {
+      // eslint-disable-next-line no-console
+      console.error('[log] unable to prepare log file candidate', {
+        candidate,
+        filePath,
+        error,
+      });
     }
-    if (!fs.existsSync(LOG_FILE)) {
-      fs.writeFileSync(LOG_FILE, '', { encoding: 'utf-8' });
-    }
-  } catch (error) {
-    // eslint-disable-next-line no-console
-    console.error('[log] unable to prepare log file', { LOG_DIR, LOG_FILE, error });
   }
+
+  // eslint-disable-next-line no-console
+  console.error('[log] no writable log directory available; falling back to stdout only');
+  return null;
 }
 
 function writeLog(level: string, message: string) {
   const entry = `[${new Date().toISOString()}] [${level}] ${message}\n`;
 
-  try {
-    ensureLogFile();
-    fs.appendFileSync(LOG_FILE, entry, { encoding: 'utf-8' });
-  } catch (error) {
-    // eslint-disable-next-line no-console
-    console.error('[log] failed to write log entry', error);
+  const logFile = prepareLogFile();
+  if (logFile) {
+    try {
+      fs.appendFileSync(logFile, entry, { encoding: 'utf-8' });
+    } catch (error) {
+      // eslint-disable-next-line no-console
+      console.error('[log] failed to write log entry', { logFile, error });
+    }
   }
 
   // Mirror logs to stdout so renderer/devtools can observe activity without
@@ -49,4 +73,8 @@ export function logError(message: string, error?: unknown) {
 
 export function logStep(message: string) {
   writeLog('STEP', message);
+}
+
+export function getResolvedLogPath() {
+  return { dir: resolvedLogDir, file: resolvedLogFile };
 }
