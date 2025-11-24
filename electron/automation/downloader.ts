@@ -1,6 +1,7 @@
 import fs from 'fs/promises';
 import path from 'path';
 import { type Browser, type Page } from 'puppeteer-core';
+import { pages } from '../../core/config/pages';
 import { runDownloadLoop } from '../../core/download/downloadFlow';
 import { selectors, waitForVisible } from '../../core/selectors/selectors';
 
@@ -81,27 +82,62 @@ async function configureDownloads(page: Page, downloadsDir: string): Promise<voi
 
 async function preparePage(browser: Browser, downloadDir: string): Promise<Page> {
   const context = browser.browserContexts()[0] ?? browser.defaultBrowserContext();
-  const pages = await context.pages();
-  const existing = pages.find((p) => p.url().startsWith('https://sora.chatgpt.com'));
+  const pagesList = await context.pages();
+  const existing = pagesList.find((p) => p.url().startsWith(pages.baseUrl));
   const page = existing ?? (await context.newPage());
 
   await configureDownloads(page, downloadDir);
-  const draftsUrl = 'https://sora.chatgpt.com/drafts';
-  if (!page.url().startsWith(draftsUrl)) {
-    await page.goto(draftsUrl, { waitUntil: 'networkidle2' });
+  if (!page.url().startsWith(pages.draftsUrl)) {
+    await page.goto(pages.draftsUrl, { waitUntil: 'networkidle2' });
   }
   await waitForVisible(page, selectors.cardItem).catch(() => undefined);
   return page;
 }
 
-async function getCurrentVideoSignature(page: Page): Promise<string> {
-  return page.evaluate(() => {
+type CardMeta = {
+  url: string;
+  index: number;
+  label: string;
+  signature: string;
+};
+
+async function getCurrentCardMeta(page: Page): Promise<CardMeta> {
+  return page.evaluate((cardSelector) => {
     const video = document.querySelector('video') as HTMLVideoElement | null;
     const src = video?.currentSrc || video?.src || '';
     const path = window.location.pathname || '';
     const poster = video?.getAttribute('poster') ?? '';
-    return `${path}::${src}::${poster}`;
-  });
+    const cards = Array.from(document.querySelectorAll(cardSelector)) as HTMLAnchorElement[];
+    let activeIndex = -1;
+    let activeLabel = '';
+
+    const normalizedPath = path.split('/').filter(Boolean).pop();
+
+    cards.forEach((card, idx) => {
+      if (activeIndex !== -1) return;
+      const href = card.getAttribute('href') ?? '';
+      const text = (card.textContent ?? '').trim();
+      const ariaCurrent = card.getAttribute('aria-current');
+
+      if (href && normalizedPath && href.includes(normalizedPath)) {
+        activeIndex = idx;
+        activeLabel = text;
+        return;
+      }
+
+      if (ariaCurrent === 'page' || card.classList.contains('active') || card.classList.contains('selected')) {
+        activeIndex = idx;
+        activeLabel = text;
+      }
+    });
+
+    return {
+      url: window.location.href,
+      index: activeIndex,
+      label: activeLabel,
+      signature: `${path}::${src}::${poster}`,
+    } satisfies CardMeta;
+  }, selectors.cardItem);
 }
 
 async function longSwipeOnce(page: Page): Promise<void> {
@@ -153,56 +189,73 @@ async function scrollToNextCardInFeed(
   pauseMs = 1800,
   timeoutMs = 9000
 ): Promise<boolean> {
-  const startUrl = page.url();
-  const startSig = await getCurrentVideoSignature(page);
+  const startMeta = await getCurrentCardMeta(page);
+  const deadline = Date.now() + timeoutMs;
 
-  const waitForChange = async (totalMs: number): Promise<boolean> => {
-    const deadline = Date.now() + totalMs;
-    while (Date.now() < deadline) {
-      const [url, sig] = await Promise.all([
-        Promise.resolve(page.url()),
-        getCurrentVideoSignature(page),
-      ]);
-      if (url !== startUrl || sig !== startSig) {
-        return true;
+  const waitForChange = async (totalMs: number): Promise<CardMeta | null> => {
+    const limit = Date.now() + totalMs;
+    while (Date.now() < limit) {
+      const meta = await getCurrentCardMeta(page);
+      const indexChanged = meta.index !== -1 && meta.index !== startMeta.index;
+      const labelChanged = meta.label && meta.label !== startMeta.label;
+      const urlChanged = meta.url !== startMeta.url;
+      const signatureChanged = meta.signature !== startMeta.signature;
+
+      if (indexChanged || labelChanged || urlChanged || signatureChanged) {
+        return meta;
       }
-      await delay(180);
+      await delay(220);
     }
-    const [finalUrl, finalSig] = await Promise.all([
-      Promise.resolve(page.url()),
-      getCurrentVideoSignature(page),
-    ]);
-    return finalUrl !== startUrl || finalSig !== startSig;
+    const finalMeta = await getCurrentCardMeta(page);
+    const indexChanged = finalMeta.index !== -1 && finalMeta.index !== startMeta.index;
+    const labelChanged = finalMeta.label && finalMeta.label !== startMeta.label;
+    const urlChanged = finalMeta.url !== startMeta.url;
+    const signatureChanged = finalMeta.signature !== startMeta.signature;
+    return indexChanged || labelChanged || urlChanged || signatureChanged ? finalMeta : null;
   };
 
-  for (let attempt = 0; attempt < 3; attempt += 1) {
-    await longSwipeOnce(page);
-    if (await waitForChange(Math.floor(timeoutMs * 0.6))) {
-      try {
-        await waitForVisible(page, selectors.rightPanel, 6_500);
-      } catch {
-        // ignore
-      }
-      return true;
-    }
-    await keyNudgeForNextCard(page);
-    await delay(Math.floor(pauseMs * 0.9));
-  }
+  const logProgress = (message: string) => {
+    logInfo('downloader', `[Feed] ${message}`);
+  };
 
-  await page.evaluate(() => {
-    window.scrollBy(0, window.innerHeight * 0.95);
-  });
-  await keyNudgeForNextCard(page);
-  await delay(900);
-  if (await waitForChange(Math.floor(timeoutMs * 0.9))) {
+  const tryReadyPanel = async () => {
     try {
       await waitForVisible(page, selectors.rightPanel, 6_500);
     } catch {
-      // ignore
+      // ignore panel wait errors
     }
+  };
+
+  for (let attempt = 0; attempt < 3 && Date.now() < deadline; attempt += 1) {
+    logProgress(`Scroll attempt ${attempt + 1}`);
+    await longSwipeOnce(page);
+    const changedMeta = await waitForChange(Math.floor(timeoutMs * 0.5));
+    if (changedMeta) {
+      logProgress(
+        `Moved to card index ${changedMeta.index} (${changedMeta.label || 'no-label'}) from ${startMeta.index}`
+      );
+      await tryReadyPanel();
+      return true;
+    }
+    await keyNudgeForNextCard(page);
+    await delay(Math.floor(pauseMs * 0.8));
+  }
+
+  logProgress('Fallback scrollBy engaged');
+  await page.evaluate(() => {
+    window.scrollBy(window.innerWidth * 0.1, window.innerHeight * 0.95);
+  });
+  await keyNudgeForNextCard(page);
+  const fallbackChanged = await waitForChange(Math.max(600, deadline - Date.now()));
+  if (fallbackChanged) {
+    logProgress(
+      `Moved to card index ${fallbackChanged.index} (${fallbackChanged.label || 'no-label'}) via fallback`
+    );
+    await tryReadyPanel();
     return true;
   }
 
+  logProgress('Failed to move to next card before timeout');
   return false;
 }
 
@@ -263,7 +316,7 @@ export async function runDownloads(
     const explicitCap = Number.isFinite(maxVideos) && maxVideos > 0 ? maxVideos : 0;
     const fallbackCap = Number.isFinite(session.maxVideos) && session.maxVideos > 0 ? session.maxVideos : 0;
     const hardCap = explicitCap > 0 ? explicitCap : fallbackCap;
-    const draftsUrl = 'https://sora.chatgpt.com/drafts';
+    const draftsUrl = pages.draftsUrl;
 
     if (!page) {
       return { ok: false, downloaded, error: 'No active page' };
@@ -284,7 +337,7 @@ export async function runDownloads(
       swipeNext: async () => {
         const moved = await scrollToNextCardInFeed(activePage);
         if (!moved) {
-          throw new Error('Could not scroll to next card');
+          throw new Error('Не удалось перейти к следующей карточке');
         }
       },
       onStateChange: () => heartbeat(runId),

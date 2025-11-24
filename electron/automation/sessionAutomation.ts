@@ -2,6 +2,7 @@ import fs from 'fs/promises';
 import path from 'path';
 import type { Browser, ElementHandle, Page } from 'puppeteer-core';
 import type { RunResult } from '../../shared/types';
+import { pages } from '../../core/config/pages';
 import { selectors, waitForClickable, waitForVisible } from '../../core/selectors/selectors';
 import { configureDownloads, newPage, type SessionRunContext } from './chromeController';
 import { getOrLaunchChromeForProfile } from '../chrome/manager';
@@ -11,7 +12,7 @@ import { logError } from '../../core/utils/log';
 
 const delay = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
 
-const DRAFTS_URL = 'https://sora.chatgpt.com/drafts';
+const DRAFTS_URL = pages.draftsUrl;
 
 const sessionLocks = new Set<string>();
 const sessionContexts = new Map<string, SessionRunContext>();
@@ -199,7 +200,7 @@ const runPromptsInternal = async (ctx: SessionRunContext): Promise<RunResult> =>
     browser = managedBrowser;
     const page = await newPage(browser);
     await configureDownloads(page, ctx.downloadsDir);
-    await page.goto('https://sora.chatgpt.com', { waitUntil: 'networkidle2' });
+    await page.goto(pages.baseUrl, { waitUntil: 'networkidle2' });
     await waitForVisible(page, selectors.promptInput, ctx.config.draftTimeoutMs);
 
     for (let i = 0; i < prompts.length; i += 1) {

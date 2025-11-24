@@ -17,6 +17,7 @@ import { blurVideoWithProfile, listBlurProfiles, saveBlurProfile, deleteBlurProf
 import { testTelegram, sendTelegramMessage } from './integrations/telegram';
 import { loggerEvents, logError } from './logging/logger';
 import { logInfo } from '../core/utils/log';
+import { pages } from '../core/config/pages';
 import { getDailyStats, getTopSessions } from './logging/history';
 import { getLastSelectorForSession, startInspectorForSession } from './automation/selectorInspector';
 import { runCleanupNow, scheduleDailyCleanup } from './maintenance/cleanup';
@@ -277,7 +278,7 @@ handle('downloader:openDrafts', async (sessionKey: string) => {
   try {
     const browser = await getOrLaunchManualBrowser(session as Session);
     const page = await browser.newPage();
-    await page.goto('https://sora.chatgpt.com/drafts', { waitUntil: 'networkidle2' });
+    await page.goto(pages.draftsUrl, { waitUntil: 'networkidle2' });
     return { ok: true, details: 'Drafts page opened' };
   } catch (error) {
     const message = (error as Error).message || 'Failed to open drafts';
@@ -292,7 +293,7 @@ handle('downloader:scanDrafts', async (sessionKey: string) => {
   try {
     const browser = await getOrLaunchManualBrowser(session as Session);
     const page = await browser.newPage();
-    await page.goto('https://sora.chatgpt.com/drafts', { waitUntil: 'networkidle2' });
+    await page.goto(pages.draftsUrl, { waitUntil: 'networkidle2' });
     const cards = await page.$$('.sora-draft-card');
     return { ok: true, draftsFound: cards.length };
   } catch (error) {

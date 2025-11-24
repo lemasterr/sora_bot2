@@ -5,6 +5,7 @@ import path from 'path';
 import puppeteer, { type Browser } from 'puppeteer-core';
 
 import { launchChromeWithCDP, waitForCDP } from '../../core/chrome/chromeLauncher';
+import { pages } from '../../core/config/pages';
 import { ChromeProfile, resolveProfileLaunchTarget } from './profiles';
 import { logInfo } from '../../core/utils/log';
 
@@ -203,7 +204,7 @@ async function ensureChromeWithCDP(profile: ChromeProfile, port: number): Promis
         '     - On macOS: press Cmd+Q in Chrome, or right-click the Dock icon and choose "Quit".',
         '     - Make sure there are no "Google Chrome" processes left in Activity Monitor.',
         `  2) In the Sora Bot app, click "Start Chrome" for this session so we can launch Chrome with "--remote-debugging-port=${port}".`,
-        '  3) Then open https://sora.chatgpt.com in that Chrome window and run downloads/prompts again.',
+        `  3) Then open ${pages.baseUrl} in that Chrome window and run downloads/prompts again.`,
       ].join('\n')
     );
   }

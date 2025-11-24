@@ -2,6 +2,7 @@ import fs from 'fs/promises';
 import path from 'path';
 import { type Browser, type Page } from 'puppeteer-core';
 
+import { pages } from '../../core/config/pages';
 import { selectors, waitForClickable, waitForVisible } from '../../core/selectors/selectors';
 import { getConfig, type Config } from '../config/config';
 import { getSessionPaths } from '../sessions/repo';
@@ -58,14 +59,14 @@ async function readLines(filePath: string): Promise<string[]> {
 
 async function preparePage(browser: Browser): Promise<Page> {
   const context = browser.browserContexts()[0] ?? browser.defaultBrowserContext();
-  const pages = await context.pages();
-  const existing = pages.find((p) => p.url().startsWith('https://sora.chatgpt.com'));
+  const pagesList = await context.pages();
+  const existing = pagesList.find((p) => p.url().startsWith(pages.baseUrl));
   const page = existing ?? (await context.newPage());
 
   try {
     await waitForVisible(page, selectors.promptInput, 20_000);
   } catch {
-    await page.goto('https://sora.chatgpt.com', { waitUntil: 'networkidle2' });
+    await page.goto(pages.baseUrl, { waitUntil: 'networkidle2' });
     await waitForVisible(page, selectors.promptInput, 60_000);
   }
 

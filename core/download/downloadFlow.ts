@@ -188,6 +188,7 @@ export async function runDownloadLoop(options: {
 
   let state: DownloadState = DownloadState.Idle;
   const savedFiles: string[] = [];
+  let cardNumber = 1;
   await fs.mkdir(downloadDir, { recursive: true });
 
   const notify = (next: DownloadState) => {
@@ -214,8 +215,10 @@ export async function runDownloadLoop(options: {
     try {
       notify(DownloadState.WaitCardReady);
       await waitUntilCardReady(page, waitForReadySelectors);
+      logStep(`Открыта карточка №${cardNumber}`);
 
       notify(DownloadState.StartDownload);
+      logStep('Клик по кнопке скачки');
       const startedAt = Date.now();
       const beforeStartNames = new Set(seenNames);
 
@@ -230,6 +233,16 @@ export async function runDownloadLoop(options: {
       seenNames.add(path.basename(savedPath));
       savedFiles.push(savedPath);
 
+      try {
+        const stats = await fs.stat(savedPath);
+        const durationMs = Date.now() - startedAt;
+        logStep(
+          `Файл скачан: ${path.basename(savedPath)}, размер=${stats.size} bytes, время=${durationMs} ms`
+        );
+      } catch (error) {
+        logError('Не удалось прочитать файл после скачивания', error);
+      }
+
       if (savedFiles.length >= maxDownloads) {
         notify(DownloadState.Done);
         break;
@@ -237,11 +250,13 @@ export async function runDownloadLoop(options: {
 
       notify(DownloadState.SwipeNext);
       await swipeNext();
+      cardNumber += 1;
     } catch (error) {
       logError('Download loop iteration failed', error);
       try {
         notify(DownloadState.SwipeNext);
         await swipeNext();
+        cardNumber += 1;
       } catch (swipeError) {
         logError('Failed to swipe after download error', swipeError);
         break;
