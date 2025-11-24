@@ -17,6 +17,12 @@ function writeLog(level: string, message: string) {
   ensureLogFile();
   const entry = `[${new Date().toISOString()}] [${level}] ${message}\n`;
   fs.appendFileSync(LOG_FILE, entry, { encoding: 'utf-8' });
+
+  // Mirror logs to stdout so renderer/devtools can observe activity without
+  // tailing the file directly. This helps during automated runs and when
+  // debugging workflows from the terminal.
+  // eslint-disable-next-line no-console
+  console.log(entry.trimEnd());
 }
 
 export function logInfo(message: string) {
