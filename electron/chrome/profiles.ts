@@ -37,6 +37,8 @@ export type SessionProfilePreference = {
 
 let cachedProfiles: ChromeProfile[] | null = null;
 
+type VerificationResult = { ok: boolean; reason?: string };
+
 function mapCoreProfile(profile: CoreChromeProfile): ChromeProfile {
   const profileDirectory = path.basename(profile.path);
   const userDataDir = path.dirname(profile.path);
@@ -81,7 +83,7 @@ async function pathExists(candidate: string): Promise<boolean> {
   }
 }
 
-async function ensureCloneSeededFromProfile(
+export async function ensureCloneSeededFromProfile(
   profile: ChromeProfile,
   cloneDir: string
 ): Promise<void> {
@@ -243,6 +245,65 @@ export async function resolveProfileLaunchTarget(
   // Chrome will treat this userDataDir as an independent profile root.
   // All cookies/extensions/logins for Sora will live under this clone dir.
   return { userDataDir, profileDirectoryArg: undefined };
+}
+
+export async function verifyProfileClone(
+  cloneDir: string,
+  profileDirName = 'Default'
+): Promise<VerificationResult> {
+  const reasons: string[] = [];
+
+  const profileDirPath = path.join(cloneDir, profileDirName);
+  const preferencesPath = path.join(profileDirPath, 'Preferences');
+  const localStatePath = path.join(cloneDir, 'Local State');
+
+  try {
+    const stats = await fs.stat(cloneDir);
+    if (!stats.isDirectory()) {
+      reasons.push('clone path is not a directory');
+    }
+  } catch (error) {
+    const message = (error as Error)?.message ?? 'missing clone directory';
+    reasons.push(`clone directory unavailable (${message})`);
+  }
+
+  try {
+    const stats = await fs.stat(profileDirPath);
+    if (!stats.isDirectory()) {
+      reasons.push(`profile directory ${profileDirName} is not a folder`);
+    }
+  } catch (error) {
+    const message = (error as Error)?.message ?? 'not found';
+    reasons.push(`profile directory ${profileDirName} missing (${message})`);
+  }
+
+  try {
+    const preferencesRaw = await fs.readFile(preferencesPath, 'utf-8');
+    if (!preferencesRaw.trim()) {
+      reasons.push('Preferences file is empty');
+    } else {
+      JSON.parse(preferencesRaw);
+    }
+  } catch (error) {
+    const message = (error as Error)?.message ?? 'unreadable Preferences';
+    reasons.push(`Preferences corrupted or unreadable (${message})`);
+  }
+
+  try {
+    const localStateRaw = await fs.readFile(localStatePath, 'utf-8');
+    if (localStateRaw.trim()) {
+      JSON.parse(localStateRaw);
+    }
+  } catch (error) {
+    const message = (error as Error)?.message ?? 'unreadable Local State';
+    reasons.push(`Local State corrupted (${message})`);
+  }
+
+  if (reasons.length > 0) {
+    return { ok: false, reason: reasons.join(' | ') };
+  }
+
+  return { ok: true };
 }
 
 export async function scanChromeProfiles(): Promise<ChromeProfile[]> {

@@ -1,12 +1,14 @@
 import { spawn, spawnSync } from 'child_process';
 import fs from 'fs';
 import http from 'http';
+import net from 'net';
 import path from 'path';
 import puppeteer, { type Browser } from 'puppeteer-core';
 
 import { launchChromeWithCDP, waitForCDP } from '../../core/chrome/chromeLauncher';
 import { pages } from '../../core/config/pages';
-import { ChromeProfile, resolveProfileLaunchTarget } from './profiles';
+import { getConfig } from '../config/config';
+import { ChromeProfile, ensureCloneSeededFromProfile, resolveProfileLaunchTarget, verifyProfileClone } from './profiles';
 import { logInfo } from '../../core/utils/log';
 
 const CDP_HOST = '127.0.0.1';
@@ -145,6 +147,21 @@ async function isEndpointAvailable(endpoint: string): Promise<boolean> {
   });
 }
 
+async function isPortBusy(port: number): Promise<boolean> {
+  return new Promise((resolve) => {
+    const socket = net.createConnection({ host: CDP_HOST, port, timeout: 800 });
+    socket.once('connect', () => {
+      socket.destroy();
+      resolve(true);
+    });
+    socket.once('error', () => resolve(false));
+    socket.once('timeout', () => {
+      socket.destroy();
+      resolve(false);
+    });
+  });
+}
+
 type LaunchInfo = { endpoint: string; alreadyRunning: boolean; childPid?: number };
 
 async function readDevToolsActivePort(userDataDir: string): Promise<number | null> {
@@ -167,9 +184,33 @@ async function findDevToolsActivePort(candidateDirs: Iterable<string>): Promise<
 }
 
 async function ensureChromeWithCDP(profile: ChromeProfile, port: number): Promise<LaunchInfo> {
+  const config = await getConfig();
+  try {
+    await fs.promises.access(config.sessionsRoot, fs.constants.R_OK | fs.constants.W_OK);
+  } catch (error) {
+    throw new Error(
+      [
+        `Нет доступа к sessionsRoot: ${config.sessionsRoot}.`,
+        'Проверьте права на директорию или выберите другой путь в настройках.',
+        (error as Error)?.message ?? '',
+      ]
+        .filter(Boolean)
+        .join('\n')
+    );
+  }
+
   const endpoint = `http://${CDP_HOST}:${port}`;
   if (await isEndpointAvailable(endpoint)) {
     return { endpoint, alreadyRunning: true };
+  }
+
+  if (await isPortBusy(port)) {
+    throw new Error(
+      [
+        `CDP порт ${port} уже занят другим процессом.`,
+        'Закройте все окна Chrome или выберите другой порт в настройках.',
+      ].join('\n')
+    );
   }
 
   const { userDataDir, profileDirectoryArg } = await resolveProfileLaunchTarget(profile);
@@ -189,8 +230,22 @@ async function ensureChromeWithCDP(profile: ChromeProfile, port: number): Promis
     }
   }
 
-  if (!fs.existsSync(userDataDir)) {
-    throw new Error(`Chrome profile directory not found at ${userDataDir}. Please re-select the profile in Settings.`);
+  const verification = await verifyProfileClone(userDataDir, profileDirectoryArg ?? 'Default');
+  if (!verification.ok) {
+    logInfo(
+      `[chrome] cloned profile at ${userDataDir} failed verification: ${verification.reason ?? 'unknown'} — attempting to re-seed`
+    );
+    await ensureCloneSeededFromProfile(profile, userDataDir);
+    const postSeedVerification = await verifyProfileClone(userDataDir, profileDirectoryArg ?? 'Default');
+    if (!postSeedVerification.ok) {
+      throw new Error(
+        [
+          `Клон профиля поврежден: ${postSeedVerification.reason ?? 'неизвестная ошибка'}.`,
+          `Директория: ${userDataDir}.`,
+          'Удалите клон или выберите другой профиль, затем перезапустите сессию.',
+        ].join('\n')
+      );
+    }
   }
 
   if (isProfileDirInUse(userDataDir)) {
