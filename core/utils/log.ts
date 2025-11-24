@@ -1,22 +1,35 @@
 import fs from 'fs';
 import path from 'path';
 
-const LOG_DIR = path.resolve(process.cwd(), 'logs');
+const LOG_DIR = process.env.SORA_LOG_DIR
+  ? path.resolve(process.env.SORA_LOG_DIR)
+  : path.resolve(process.cwd(), 'logs');
 const LOG_FILE = path.join(LOG_DIR, 'app.log');
 
 function ensureLogFile() {
-  if (!fs.existsSync(LOG_DIR)) {
-    fs.mkdirSync(LOG_DIR, { recursive: true });
-  }
-  if (!fs.existsSync(LOG_FILE)) {
-    fs.writeFileSync(LOG_FILE, '', { encoding: 'utf-8' });
+  try {
+    if (!fs.existsSync(LOG_DIR)) {
+      fs.mkdirSync(LOG_DIR, { recursive: true });
+    }
+    if (!fs.existsSync(LOG_FILE)) {
+      fs.writeFileSync(LOG_FILE, '', { encoding: 'utf-8' });
+    }
+  } catch (error) {
+    // eslint-disable-next-line no-console
+    console.error('[log] unable to prepare log file', { LOG_DIR, LOG_FILE, error });
   }
 }
 
 function writeLog(level: string, message: string) {
-  ensureLogFile();
   const entry = `[${new Date().toISOString()}] [${level}] ${message}\n`;
-  fs.appendFileSync(LOG_FILE, entry, { encoding: 'utf-8' });
+
+  try {
+    ensureLogFile();
+    fs.appendFileSync(LOG_FILE, entry, { encoding: 'utf-8' });
+  } catch (error) {
+    // eslint-disable-next-line no-console
+    console.error('[log] failed to write log entry', error);
+  }
 
   // Mirror logs to stdout so renderer/devtools can observe activity without
   // tailing the file directly. This helps during automated runs and when
